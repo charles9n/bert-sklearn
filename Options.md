@@ -23,7 +23,7 @@ model = BertClassifier(
                 logfile='bert_sklearn.log')
 ```
 
-### options
+### bert model options
 
 `bert_model`: one of Google AI's pretrained BERT models.  See [pytorch-pretrained-BERT doc](https://github.com/huggingface/pytorch-pretrained-BERT#Doc) for more info.
  * `'bert-base-uncased'` (default)
@@ -33,15 +33,16 @@ model = BertClassifier(
  * `'bert-base-multilingual-uncased'`
  * `'bert-base-multilingual-cased'`
  * `'bert-base-chinese'`
-                     
+
+### final classifier/regressor options
 `label_list`: list of classifier labels. If `None`, then the labels will be inferred from training data in model.fit(). Default: `None`
+
+`num_mlp_layers`: the number of mlp layers in final mlp classifier/regressor. If set to 0, then defaults 
+    to the linear classifier/regresor in the original Google paper and code. Default: 0
 
 `num_mlp_hiddens`: the number of hidden neurons in each layer of the mlp. Default: 500
 
-`num_mlp_layers`: the number of mlp layers in final mlp classifier/regressor. If set to 0, then defualts 
-    to the linear classifier/regresor in the original Google paper and code. Default: 0
-
-### training/finetuning parameters
+### training/finetuning options
 
 `learning_rate`: inital learning rate of Bert Optimizer. Default: 2e-5
 
