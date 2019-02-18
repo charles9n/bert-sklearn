@@ -65,17 +65,21 @@ model.score(X_test, y_test)
 See [options](https://github.com/charles9n/bert-sklearn/blob/master/Options.md)
 
 
-## hyperparemeter tuning
+## hyperparameter tuning
 
 ```python3
-# fit on train, tune on test/dev set
-tuned = model.tune_params(X_train, y_train,
-                          X_test, y_test,
-                          epochs =  [3, 4],                          
-                          learning_rate = [2e-5, 3e-5, 5e-5])
+from sklearn.model_selection import GridSearchCV
 
-# best model
-best_model = tuned['best_model']
+params = {'epochs':[3, 4], 'learning_rate':[2e-5, 3e-5, 5e-5]}
+
+# wrap classifier in GridSearchCV
+clf = GridSearchCV(BertClassifier(validation_fraction=0), 
+                    params,
+                    scoring='accuracy',
+                    verbose=True)
+
+# fit gridsearch 
+clf.fit(X_train ,y_train)
 ```
 See [demo_tuning_hyperparameters](https://github.com/charles9n/bert-sklearn/blob/master/demo_tuning_hyperparams.ipynb) notebook.
 
