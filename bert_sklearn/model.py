@@ -2,7 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from pytorch_pretrained_bert.modeling import PreTrainedBertModel
+try:
+    from pytorch_pretrained_bert.modeling import PreTrainedBertModel as BertPreTrainedModel 
+except ImportError :
+    from pytorch_pretrained_bert.modeling import BertPreTrainedModel
+    
 from pytorch_pretrained_bert import BertModel
 
 def LinearBlock(H1, H2, p):
@@ -35,15 +39,7 @@ def MLP(D, n, H, K, p):
         layers.append(nn.Linear(H, K))
         return torch.nn.Sequential(*layers)
     
-def pool(layer, pooling='mean'):
-    if pooling=='mean':
-        return torch.mean(layer,1)
-    elif pooling=='max':
-        return torch.max(layer,1)[0]
-    elif pooling=='min':
-        return torch.min(layer,1)[0]
-
-class BertPlusMLP(PreTrainedBertModel):
+class BertPlusMLP(BertPreTrainedModel):
     """
     Bert model with MLP classifier/regressor head.
     
