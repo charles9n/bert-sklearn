@@ -13,7 +13,6 @@ from torch.utils.data import RandomSampler, SequentialSampler, SubsetRandomSampl
 from torch.utils.data.distributed import DistributedSampler
 
 from pytorch_pretrained_bert import BertTokenizer, BertModel
-from pytorch_pretrained_bert.modeling import PreTrainedBertModel
 from pytorch_pretrained_bert.optimization import BertAdam
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 
