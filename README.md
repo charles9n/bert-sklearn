@@ -91,9 +91,9 @@ The train and dev data sets from the [GLUE(Generalized Language Understanding Ev
 |BERT base(leaderboard) |84.6/83.4  | 89.2 | 90.1 | 93.5 | 52.1 | 87.1  | 84.8 | 66.4 | 
 | bert-sklearn  |83.7/83.9| 90.2 |88.6 |92.32 |58.1| 89.7 |86.8 | 64.6 |
 
-Individual runs can be found can be found [here](https://github.com/charles9n/bert-sklearn/tree/master/glue_examples).
+Individual task demos can be found can be found [here](https://github.com/charles9n/bert-sklearn/tree/master/glue_examples).
 
-## Other examples
+## other examples
 See [IMDb](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/IMDb.ipynb) for a demo on the Internet Movie Database review sentiment task.
 
 ## installation
@@ -101,7 +101,7 @@ See [IMDb](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/
 requires python >= 3.5 and pytorch >= 0.4.1
 
 ```bash
-# install pytorch-pretrained-bert from PyPI, use version 0.6.1
+# install pytorch-pretrained-bert from PyPI
 pip install pytorch-pretrained-bert==v0.6.1
 
 # setup bert-sklearn locally
