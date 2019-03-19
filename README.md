@@ -84,14 +84,14 @@ clf.fit(X_train ,y_train)
 See [demo_tuning_hyperparameters](https://github.com/charles9n/bert-sklearn/blob/master/demo_tuning_hyperparams.ipynb) notebook.
 
 ## GLUE datasets
-The train and dev data sets from the [GLUE(Generalized Language Understanding Evaluation) ](https://github.com/nyu-mll/GLUE-baselines) benchmarks were used with `bert-base-uncased` model and compared againt the reported results in the Google paper and [GLUE leaderboard](https://gluebenchmark.com/leaderboard).
+The train and dev data sets from the [GLUE(Generalized Language Understanding Evaluation) ](https://github.com/nyu-mll/GLUE-baselines) benchmarks were used with `bert-base-uncased` model and compared against the reported results in the Google paper and [GLUE leaderboard](https://gluebenchmark.com/leaderboard).
 
 |    | MNLI(m/mm)| QQP   | QNLI | SST-2| CoLA | STS-B | MRPC | RTE |
 | - | - | - | - | - |- | - | - | - |
 |BERT base(leaderboard) |84.6/83.4  | 89.2 | 90.1 | 93.5 | 52.1 | 87.1  | 84.8 | 66.4 | 
 | bert-sklearn  |83.7/83.9| 90.2 |88.6 |92.32 |58.1| 89.7 |86.8 | 64.6 |
 
-Individual task demos can be found can be found [here](https://github.com/charles9n/bert-sklearn/tree/master/glue_examples).
+Individual task demos can be found [here](https://github.com/charles9n/bert-sklearn/tree/master/glue_examples).
 
 ## other examples
 See [IMDb](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/IMDb.ipynb) for a demo on the Internet Movie Database review sentiment task.
