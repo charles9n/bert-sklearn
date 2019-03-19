@@ -93,14 +93,16 @@ The train and dev data sets from the [GLUE(Generalized Language Understanding Ev
 
 Individual runs can be found can be found [here](https://github.com/charles9n/bert-sklearn/tree/master/glue_examples).
 
+## Other examples
+See [IMDb](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/IMDb.ipynb) for a demo on the Internet Movie Database review sentiment task.
 
 ## installation
 
 requires python >= 3.5 and pytorch >= 0.4.1
 
 ```bash
-# install pytorch-pretrained-bert from PyPI
-pip install pytorch-pretrained-bert
+# install pytorch-pretrained-bert from PyPI, use version 0.6.1
+pip install pytorch-pretrained-bert==v0.6.1
 
 # setup bert-sklearn locally
 git clone -b master https://github.com/charles9n/bert-sklearn
