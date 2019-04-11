@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="bert_sklearn",
-    version="0.1.0",
+    version="0.2.0",
     author="charles_nainan",
     author_email="charles.j.9n@gmail.com",
     description="A sklearn wrapper for Bert",
