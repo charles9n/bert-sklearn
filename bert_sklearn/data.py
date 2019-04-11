@@ -1,7 +1,8 @@
 import torch
 from torch.utils.data import Dataset
 
-class TextFeatures(object):
+
+class TextFeatures:
     """
     A single set of input features for the Bert model.
     """
@@ -9,11 +10,12 @@ class TextFeatures(object):
         self.input_ids = input_ids
         self.input_mask = input_mask
         self.segment_ids = segment_ids
-        
+
+
 def _truncate_seq_pair(tokens_a, tokens_b, max_length):
     """
     Truncates a sequence pair in place to the maximum length.
-    
+
     From pytorch-pretrained-BERT/examples/run_classifier.py
     """
 
@@ -30,10 +32,11 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
         else:
             tokens_b.pop()
 
-def convert_text_to_features(text_a,text_b, max_seq_length, tokenizer):
+
+def convert_text_to_features(text_a, text_b, max_seq_length, tokenizer):
     """Loads a data file into a list of `InputBatch`s.
-    
-    Adapted from 'convert_examples_to_features' in 
+
+    Adapted from 'convert_examples_to_features' in
     pytorch-pretrained-BERT/examples/run_classifier.py
 
     """
@@ -95,68 +98,77 @@ def convert_text_to_features(text_a,text_b, max_seq_length, tokenizer):
     assert len(input_mask) == max_seq_length
     assert len(segment_ids) == max_seq_length
 
-    return TextFeatures(input_ids,input_mask,segment_ids)
+    return TextFeatures(input_ids, input_mask, segment_ids)
+
 
 class TextFeaturesDataset(Dataset):
     """
     A pytorch dataset for Bert text features.
-    
-    Args:
-    
-        X1 (list of strings): text_a for input data
-        X2 (list of strings, optional) : text_b for input data text pairs
-        y (list of string or list of floats):  labels/targets for data
-        model_type (string): specifies 'classifier' or 'regressor' model  
-        label2id ( dict map of string to int): label map for labels
-        max_seq_length (int): maximum length of input text sequence (text_a + text_b)
-        tokenizer (BertTokenizer): word tokenizer followed by WordPiece Tokenizer
+
+    Parameters
+    ----------
+
+    X1 : list of strings
+        text_a for input data
+    X2 : list of strings
+        text_b for input data text pairs
+    y : list of string or list of floats
+        labels/targets for data
+    model_type : string
+        specifies 'classifier' or 'regressor' model
+    label2id : dict map of string to int
+        label map for classifer labels
+    max_seq_length : int
+        maximum length of input text sequence (text_a + text_b)
+    tokenizer : BertTokenizer)
+        word tokenizer followed by WordPiece Tokenizer
     """
     def __init__(self,
-                X1,X2,y,
-                model_type,
-                label2id,
-                max_seq_length,
-                tokenizer):
+                 X1, X2, y,
+                 model_type,
+                 label2id,
+                 max_seq_length,
+                 tokenizer):
 
         self.X1 = X1
         self.X2 = X2
         self.y = y
-        
+
         self.len = len(self.X1)
         self.model_type = model_type
         self.label2id = label2id
         self.max_seq_length = max_seq_length
         self.tokenizer = tokenizer
-        
+
     def __getitem__(self, index):
-        
+
         if self.X2 is not None:
-            text_a = str(self.X1[index]) 
-            text_b = str(self.X2[index]) 
+            text_a = str(self.X1[index])
+            text_b = str(self.X2[index])
         else:
-            text_a = str(self.X1[index]) 
+            text_a = str(self.X1[index])
             text_b = None
-        
-        feature = convert_text_to_features(text_a,text_b, 
-                                           self.max_seq_length, 
+
+        feature = convert_text_to_features(text_a, text_b,
+                                           self.max_seq_length,
                                            self.tokenizer)
-        input_ids = torch.tensor(feature.input_ids,dtype=torch.long)
-        input_mask = torch.tensor(feature.input_mask,dtype=torch.long)
-        segment_ids = torch.tensor(feature.segment_ids,dtype=torch.long)
-        
+
+        input_ids = torch.tensor(feature.input_ids, dtype=torch.long)
+        input_mask = torch.tensor(feature.input_mask, dtype=torch.long)
+        segment_ids = torch.tensor(feature.segment_ids, dtype=torch.long)
+
         if self.y is not None:
-            
+
             label = self.y[index]
 
-            if self.model_type=='classifier':
+            if self.model_type == 'classifier':
                 label_id = self.label2id[label]
-                target =  torch.tensor(label_id, dtype=torch.long)
-            elif self.model_type=='regressor':
+                target = torch.tensor(label_id, dtype=torch.long)
+            elif self.model_type == 'regressor':
                 target = torch.tensor(label, dtype=torch.float32)
-            return input_ids,segment_ids,input_mask,target
+            return input_ids, segment_ids, input_mask, target
         else:
-            return input_ids,segment_ids,input_mask
-    
-    def __len__(self):
-        return self.len    
+            return input_ids, segment_ids, input_mask
 
+    def __len__(self):
+        return self.len
