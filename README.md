@@ -110,6 +110,12 @@ cd bert-sklearn
 pip install .
 ```
 
+## tests
+
+Run tests with pytest:
+```bash
+python -m pytest -sv tests/
+```
 ## references
 
 * [Google's original tf code](https://github.com/google-research/bert)  and [paper](https://arxiv.org/abs/1810.04805)
