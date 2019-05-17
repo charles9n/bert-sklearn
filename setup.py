@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="bert_sklearn",
-    version="0.2.0",
+    version="0.3.0",
     author="charles_nainan",
     author_email="charles.j.9n@gmail.com",
     description="A sklearn wrapper for Bert",
@@ -10,10 +10,10 @@ setup(
     license='Apache',
     url="https://github.com/charles9n/bert-sklearn",
     packages=find_packages(exclude=['test', 'scripts', 'examples']),
-    install_requires=['pytorch-pretrained-bert==v0.6.1',
-                       'torch>=0.4.1',
+    install_requires=['torch>=0.4.1',
                        'scikit-learn',
                        'numpy',
+                       'pandas',
                        'boto3',
                        'requests',
                        'tqdm'],
