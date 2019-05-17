@@ -1,25 +1,29 @@
 # scikit-learn wrapper for BERT
-A scikit-learn model for text classification/regression based on the [huggingface pytorch](https://github.com/huggingface/pytorch-pretrained-BERT) port of Google's [BERT](https://github.com/google-research/bert)(Bidirectional Encoder Representations from Transformers) model.
+
+A scikit-learn model for text and token sequence classification/regression based on the [huggingface pytorch](https://github.com/huggingface/pytorch-pretrained-BERT) port of [Google's BERT](https://github.com/google-research/bert)(Bidirectional Encoder Representations from Transformers) model.
 
 * Added an MSE loss for regression tasks
 * Added configurable MLP as final classifier/regressor
+* Added Token Sequence Classifier for NER, PoS, and chunking tasks
 
 ## basic operation
 
 **`model.fit(X,y)`** where
 
-* **`X`**: list, pandas dataframe, or numpy array of text or text pairs
+* **`X`**: list, pandas dataframe, or numpy array of text, text pairs, or token lists
 
 * **`y`** : list, pandas dataframe, or numpy array of labels/targets
 
 ```python3
 from bert_sklearn import BertClassifier
 from bert_sklearn import BertRegressor
+from bert_sklearn import BertTokenClassifier
 from bert_sklearn import load_model
 
 # define model
-model = BertClassifier()   # for classification 
-# model = BertRegressor()  # for regression 
+model = BertClassifier()         # text/text pair classification
+# model = BertRegressor()        # text/text pair regression
+# model = BertTokenClassifier()  # token sequence classification
  
 # fit model
 model.fit(X_train, y_train)
@@ -93,17 +97,30 @@ The train and dev data sets from the [GLUE(Generalized Language Understanding Ev
 
 Individual task demos can be found [here](https://github.com/charles9n/bert-sklearn/tree/master/glue_examples).
 
-## other examples
-See [IMDb](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/IMDb.ipynb) for a demo on the Internet Movie Database review sentiment task.
+## CoNLL-2003 Named Entity Recognition(NER)
+
+NER results for [**`CoNLL-2003`**](https://www.clips.uantwerpen.be/conll2003/ner/)  shared task
+
+|    | dev f1 | test f1   |
+| - | - | - |
+| BERT paper| 96.4 | 92.4|
+| bert-sklearn | 96.04 | 91.97|
+
+See [ner_english](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/ner_english.ipynb) for a demp using `'bert-base-cased'` model.
+
+## Other examples
+
+* See [IMDb](https://github.com/charles9n/bert-sklearn-tmp/blob/master/other_examples/IMDb.ipynb) for a text classification demo on the Internet Movie Database review sentiment task.
+
+* See [chunking_english](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/chunker_english.ipynb) for a demo on syntactic chunking using the [**`CoNLL-2000`**](https://www.clips.uantwerpen.be/conll2003/ner/) chunking task data.
+
+* See [ner_chinese](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/ner_chinese.ipynb) for a demo using `'bert-base-chinese'` for Chinese NER.
 
 ## installation
 
 requires python >= 3.5 and pytorch >= 0.4.1
 
 ```bash
-# install pytorch-pretrained-bert from PyPI
-pip install pytorch-pretrained-bert==v0.6.1
-
 # setup bert-sklearn locally
 git clone -b master https://github.com/charles9n/bert-sklearn
 cd bert-sklearn
