@@ -106,7 +106,7 @@ NER results for [**`CoNLL-2003`**](https://www.clips.uantwerpen.be/conll2003/ner
 | BERT paper| 96.4 | 92.4|
 | bert-sklearn | 96.04 | 91.97|
 
-See [ner_english](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/ner_english.ipynb) for a demp using `'bert-base-cased'` model.
+See [ner_english](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/ner_english.ipynb) for a demo using `'bert-base-cased'` model.
 
 ## Other examples
 
