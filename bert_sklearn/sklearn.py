@@ -1,25 +1,73 @@
-"""sklearn interface to finetuning BERT."""
+"""sklearn interface to finetuning BERT.
+
+Overall flow:
+-------------
+
+    # define model
+    model = BertClassifier()       # text/text pair classification
+    model = BertRegressor()        # text/text pair regression
+    model = BertTokenClassifier()  # token sequence classification
+
+    # fit model to training data
+    model.fit(X_train, y_train)
+
+    # score model on holdout data
+    model.score(X_dev, y_dev)
+
+    # predict model on new inputs
+    model.predict(X_test)
+
+
+Model inputs X, y:
+------------------
+
+    For text pair tasks:
+        X = [X1, X2]
+            Model inputs are triples : (text_a, text_b, label/target)
+            X1 is 1D list-like of text_a strings
+            X2 is 1D list-like of text_b strings
+
+    For single text tasks:
+        X = 1D list-like of text strings
+
+    For text classification tasks:
+        y = 1D list-like of string labels
+
+    For text regression  tasks:
+        y = 1D list-like of floats
+
+    For token classification tasks:
+        X = 2D list-like of token strings
+        y = 2D list-like of token tags
+"""
 
 import logging
-import random
+from collections import Counter
 
 import statistics as stats
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from sklearn.base import is_classifier
 from sklearn.model_selection import ParameterGrid
-from pytorch_pretrained_bert import BertTokenizer
+from sklearn.metrics import f1_score
 
-from bert_sklearn.data import TextFeaturesDataset
-from bert_sklearn.finetune import get_model
-from bert_sklearn.finetune import get_device
-from bert_sklearn.finetune import fit
-from bert_sklearn.finetune import eval_model
-from bert_sklearn.model import BertPlusMLP
-from bert_sklearn.config import FinetuneConfig
+from .config import model2config
+from .data import get_test_dl
+from .data.utils import flatten
+from .model import get_model
+from .model import get_tokenizer
+from .model import get_basic_tokenizer
+from .utils import prepare_model_and_device
+from .utils import get_logger
+from .utils import set_random_seed
+from .utils import to_numpy
+from .utils import unpack_data
+from .finetune import finetune
+from .finetune import eval_model
 
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -31,60 +79,9 @@ SUPPORTED_MODELS = ('bert-base-uncased', 'bert-large-uncased', 'bert-base-cased'
                     'bert-base-multilingual-cased', 'bert-base-chinese')
 
 
-def set_random_seed(seed=42, use_cuda=True):
-    """Seed all random number generators to enable repeatable runs"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if use_cuda:
-        torch.cuda.manual_seed_all(seed)
-
-
-def get_logger(logname, no_stdout=True):
-    logger = logging.getLogger()
-    handler = logging.StreamHandler(open(logname, "a"))
-    handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                                  datefmt='%m/%d/%Y %H:%M:%S')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    if no_stdout:
-        logger.removeHandler(logger.handlers[0])
-
-    return logger
-
-
-def to_numpy(X):
-    """
-    Convert input to numpy ndarray
-    """
-    if hasattr(X, 'iloc'):              # pandas
-        return X.values
-    elif isinstance(X, list):           # list
-        return np.array(X)
-    elif isinstance(X, np.ndarray):     # ndarray
-        return X
-    else:
-        raise ValueError("Unable to handle input type %s"%str(type(X)))
-
-
-def unpack_text_pairs(X):
-    """
-    Unpack text pairs
-    """
-    if X.ndim == 1:
-        texts_a = X
-        texts_b = None
-    else:
-        texts_a = X[:, 0]
-        texts_b = X[:, 1]
-
-    return texts_a, texts_b
-
-
 class BaseBertEstimator(BaseEstimator):
     """
-    Base Class for Bert Classifier and Regressor.
+    Base Class for Bert Classifiers and Regressors.
 
     Parameters
     ----------
@@ -128,86 +125,105 @@ class BaseBertEstimator(BaseEstimator):
         fraction of training set to use for validation
     logname : string
         path name for logfile
-
+    ignore_label : list of strings
+        Labels to be ignored when calculating f1 for token classifiers
     """
     def __init__(self, label_list=None, bert_model='bert-base-uncased',
                  num_mlp_hiddens=500, num_mlp_layers=0, restore_file=None,
-                 epochs=3,
-                 max_seq_length=128,
-                 train_batch_size=32,
-                 eval_batch_size=8,
-                 learning_rate=2e-5,
-                 warmup_proportion=0.1,
-                 gradient_accumulation_steps=1,
-                 fp16=False,
-                 loss_scale=0,
-                 local_rank=-1,
-                 use_cuda=True,
-                 random_state=42,
-                 validation_fraction=0.1,
-                 logfile='bert_sklearn.log'):
+                 epochs=3, max_seq_length=128, train_batch_size=32,
+                 eval_batch_size=8, learning_rate=2e-5, warmup_proportion=0.1,
+                 gradient_accumulation_steps=1, fp16=False, loss_scale=0,
+                 local_rank=-1, use_cuda=True, random_state=42,
+                 validation_fraction=0.1, logfile='bert_sklearn.log',
+                 ignore_label=None):
 
         self.id2label, self.label2id = {}, {}
         self.input_text_pairs = None
 
-        if restore_file is not None:
-            # finish loading a previously finetuned model
-            self.restore_finetuned_model(restore_file)
-        else:
-            # a bert model will be loaded during fit()
-            self.label_list = label_list
-            self.bert_model = bert_model
-            self.num_mlp_hiddens = num_mlp_hiddens
-            self.num_mlp_layers = num_mlp_layers
-            self.restore_file = restore_file
-            self.epochs = epochs
-            self.max_seq_length = max_seq_length
-            self.train_batch_size = train_batch_size
-            self.eval_batch_size = eval_batch_size
-            self.learning_rate = learning_rate
-            self.warmup_proportion = warmup_proportion
-            self.gradient_accumulation_steps = gradient_accumulation_steps
-            self.fp16 = fp16
-            self.loss_scale = loss_scale
-            self.local_rank = local_rank
-            self.use_cuda = use_cuda
-            self.random_state = random_state
-            self.validation_fraction = validation_fraction
-            self.logfile = logfile
+        self.label_list = label_list
+        self.bert_model = bert_model
+        self.num_mlp_hiddens = num_mlp_hiddens
+        self.num_mlp_layers = num_mlp_layers
+        self.restore_file = restore_file
+        self.epochs = epochs
+        self.max_seq_length = max_seq_length
+        self.train_batch_size = train_batch_size
+        self.eval_batch_size = eval_batch_size
+        self.learning_rate = learning_rate
+        self.warmup_proportion = warmup_proportion
+        self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.fp16 = fp16
+        self.loss_scale = loss_scale
+        self.local_rank = local_rank
+        self.use_cuda = use_cuda
+        self.random_state = random_state
+        self.validation_fraction = validation_fraction
+        self.logfile = logfile
+        self.ignore_label = ignore_label
+        self.majority_label = None
 
+        # a BertPlusMLP model and BertTokenizer will be loaded during fit()
+        self.model = None
+        self.tokenizer = None
+
+        # if given a restore_file, then finish loading a previously finetuned
+        # model. Normally a user wouldn't do this directly. This is called from
+        # load_model() to finish constructing the object
+        if restore_file is not None:
+            self.restore_finetuned_model(restore_file)
+
+        # the sklearn convention is to only call validate_params in fit, but I
+        # feel like it should be in init as well
+        self._validate_hyperparameters()
+
+        # not good to use 'isinstance' :-( but the init code for these
+        # classes are identical. So keep the ugly hack for now...
+        if isinstance(self, BertClassifier):
+            print("Building sklearn text classifier...")
+            self.model_type = "text_classifier"
+        elif isinstance(self, BertTokenClassifier):
+            print("Building sklearn token classifier...")
+            self.model_type = "token_classifier"
+        elif isinstance(self, BertRegressor):
+            print("Building sklearn text regressor...")
+            self.model_type = "text_regressor"
+            self.num_labels = 1
+
+        self.logger = get_logger(logfile)
+        self.logger.info("Loading model:\n" + str(self))
+
+    def load_tokenizer(self):
+        """
+        Load Basic and BERT Wordpiece Tokenizers
+        """
         # use lower case for uncased models
         self.do_lower_case = True if 'uncased' in self.bert_model else False
 
-        self._validate_hyperparameters()
+        # get basic tokenizer
+        self.basic_tokenizer = get_basic_tokenizer(self.do_lower_case)
 
-        self.logger = get_logger(logfile)
+        # get bert wordpiece tokenizer
+        self.tokenizer = get_tokenizer(self.bert_model, self.do_lower_case)
 
-        if is_classifier(self):
-            print("Building sklearn classifier...")
-            self.model_type = "classifier"
-        else:
-            print("Building sklearn regressor...")
-            self.model_type = "regressor"
-            self.num_labels = 1
+        return self.tokenizer
 
-        self.logger.info("Loading model:\n" + str(self))
-
-    def load_bert(self):
+    def load_bert(self, state_dict=None):
         """
         Load a BertPlusMLP model from a pretrained checkpoint.
 
-        This will be an pretrianed BERT ready to be finetuned.
+        This will be an pretrained BERT ready to be finetuned.
         """
 
         # load a vanilla bert model ready to finetune:
         # pretrained bert LM + untrained classifier/regressor
-        self.model, self.tokenizer = get_model(self.bert_model,
-                                               self.do_lower_case,
-                                               self.num_labels,
-                                               self.model_type,
-                                               self.num_mlp_layers,
-                                               self.num_mlp_hiddens,
-                                               self.local_rank)
+
+        self.model = get_model(bert_model=self.bert_model,
+                               num_labels=self.num_labels,
+                               model_type=self.model_type,
+                               num_mlp_layers=self.num_mlp_layers,
+                               num_mlp_hiddens=self.num_mlp_hiddens,
+                               state_dict=state_dict,
+                               local_rank=self.local_rank)
 
     def _validate_hyperparameters(self):
         """
@@ -272,126 +288,115 @@ class BaseBertEstimator(BaseEstimator):
         """
         Finetune pretrained Bert model.
 
-
-        Bert model input are triples : (text_a, text_b, label/target).
-
-        For text pair classification/regression tasks:
-
-            X = [(text_a, text_b)]
-
-        For single text classification/regression tasks:
-
-            X = [text]
-
         Parameters
         ----------
+        X : 1D or 2D list-like of strings
+            Input text, text pair, or token list of data features
 
-        X : 1D or 2D Array like list of strings
-            Input text or text pair data features
-
-        y : list or Array like  list of string or list of floats):
-            Labels/targets for text data
+        y : 1D or 2D list-like of strings or floats
+            Labels/targets for text or token data
 
         load_at_start : bool
             load model from saved checkpoint file at the start of the fit
 
         """
+        # validate params
+        self._validate_hyperparameters()
+
+        # set random seed for reproducability
         set_random_seed(self.random_state, self.use_cuda)
 
-        X = np.squeeze(to_numpy(X))
-        y = np.squeeze(to_numpy(y))
-
-        texts_a, texts_b = unpack_text_pairs(X)
-        labels = y
-
+        # unpack data
+        texts_a, texts_b, labels = unpack_data(X, y)
         self.input_text_pairs = not texts_b is None
 
         if is_classifier(self):
 
-            # if the label_list not specified, then infer it from y
+            # if the label_list not specified, then infer it from training data
             if self.label_list is None:
-                self.label_list = np.unique(labels)
+                if self.model_type == "text_classifier":
+                    self.label_list = np.unique(labels)
+                elif self.model_type == "token_classifier":
+                    self.label_list = np.unique(flatten(labels))
 
+            # build label2id and id2label maps
             self.num_labels = len(self.label_list)
             for (i, label) in enumerate(self.label_list):
                 self.label2id[label] = i
                 self.id2label[i] = label
 
+            # calculate majority label for token_classifier
+            if self.model_type == "token_classifier":
+                c = Counter(flatten(y))
+                self.majority_label = c.most_common()[0][0]
+                self.majority_id = self.label2id[self.majority_label]
+
+        # load model and tokenizer from checkpoint
         if load_at_start:
+            self.load_tokenizer()
             self.load_bert()
 
         # to fix BatchLayer1D prob in rare case last batch is a singlton w MLP
         drop_last_batch = False if self.num_mlp_layers == 0 else True
 
-        # create a finetune config
-        config = FinetuneConfig(
-            tokenizer=self.tokenizer,
-            model_type=self.model_type,
-            epochs=self.epochs,
-            max_seq_length=self.max_seq_length,
-            learning_rate=self.learning_rate,
-            warmup_proportion=self.warmup_proportion,
-            train_batch_size=self.train_batch_size,
-            eval_batch_size=self.eval_batch_size,
-            label2id=self.label2id,
-            gradient_accumulation_steps=self.gradient_accumulation_steps,
-            fp16=self.fp16,
-            loss_scale=self.loss_scale,
-            local_rank=self.local_rank,
-            use_cuda=self.use_cuda,
-            train_sampler='random',
-            drop_last_batch=drop_last_batch,
-            val_frac=self.validation_fraction,
-            logger=self.logger)
+        # create a finetune config object
+        config = model2config(self)
+        config.drop_last_batch = drop_last_batch
+        config.train_sampler = 'random'
 
-        # check lengths
+        # check lengths match
         assert len(texts_a) == len(labels)
         if texts_b is not None:
             assert len(texts_a) == len(texts_b)
 
-        # finetune model
-        self.model = fit(self.model, texts_a, texts_b, labels, config)
+        # finetune model!
+        self.model = finetune(self.model, texts_a, texts_b, labels, config)
 
         return self
 
-    def setup_eval(self, texts_a, texts_b, labels, use_cuda=True):
+    def setup_eval(self, texts_a, texts_b, labels):
         """
         Get dataloader and device for eval.
         """
+        config = model2config(self)
+        _, device = prepare_model_and_device(self.model, config)
+        config.device = device
 
-        device, _ = get_device(self.local_rank, use_cuda)
-
-        dataset = TextFeaturesDataset(texts_a, texts_b, labels,
-                                      self.model_type,
-                                      self.label2id,
-                                      self.max_seq_length,
-                                      self.tokenizer)
-
-        dataloader = torch.utils.data.DataLoader(dataset,
-                                                 self.eval_batch_size,
-                                                 num_workers=5)
-        self.model.to(device)
+        dataloader = get_test_dl(texts_a, texts_b, labels, config)
         self.model.eval()
-        return dataloader, device
+        return dataloader, config
 
     def score(self, X, y, verbose=True):
         """
         Score model on test/eval data.
+        
+        Parameters
+        ----------
+        X : 1D or 2D list-like of strings
+            Input text, text pair, or token list of data features
+
+        y : 1D or 2D list-like of strings or floats
+            Labels/targets for text or token data
+
+        Returns
+        ----------
+        accy: float
+            classification accuracy, or pearson for regression     
         """
-        X = np.squeeze(to_numpy(X))
-        y = np.squeeze(to_numpy(y))
+        texts_a, texts_b, labels = unpack_data(X, y)
 
-        texts_a, texts_b = unpack_text_pairs(X)
-        labels = y
+        dataloader, config = self.setup_eval(texts_a, texts_b, labels)
 
-        dataloader, device = self.setup_eval(texts_a, texts_b,
-                                             labels, self.use_cuda)
-
-        res = eval_model(self.model, dataloader, device, self.model_type, "Testing")
+        res = eval_model(self.model, dataloader, config, "Testing")
+        loss, accy = res['loss'], res['accy']
 
         if verbose:
-            print("\nTest loss: %0.04f, Test accuracy = %0.02f%%"%res)
-        return res[1]
+            msg = "\nLoss: %0.04f, Accuracy: %0.02f%%"%(loss, accy)
+            if 'f1' in res:
+                msg += ", f1: %0.02f"%(100 * res['f1'])
+            print(msg)
+
+        return accy
 
     def save(self, filename):
         """
@@ -407,6 +412,7 @@ class BaseBertEstimator(BaseEstimator):
             'num_labels' : self.num_labels,
             'id2label'   : self.id2label,
             'label2id'   : self.label2id,
+            'do_lower_case': self.do_lower_case,
             'state_dict' : model_to_save.state_dict(),
             'input_text_pairs' : self.input_text_pairs
         }
@@ -419,155 +425,51 @@ class BaseBertEstimator(BaseEstimator):
         This is called from the BertClassifier or BertRegressor. The saved model
         is a finetuned BertPlusMLP
         """
-
         print("Loading model from %s..."%(restore_file))
         state = torch.load(restore_file)
 
-        params = state['params']
-
-        bert_model = params['bert_model']
-        num_mlp_layers = params['num_mlp_layers']
-        num_mlp_hiddens = params['num_mlp_hiddens']
-
-        model_type = state['model_type']
-        num_labels = state['num_labels']
-
-        do_lower_case = True if 'uncased' in bert_model else False
-
-        self.tokenizer = BertTokenizer.from_pretrained(bert_model,
-                                                       do_lower_case=do_lower_case)
-        model_state_dict = state['state_dict']
-
-        self.model = BertPlusMLP.from_pretrained(bert_model,
-                                                 state_dict=model_state_dict,
-                                                 num_labels=num_labels,
-                                                 model_type=model_type,
-                                                 num_mlp_layers=num_mlp_layers,
-                                                 num_mlp_hiddens=num_mlp_hiddens)
-        params = state['params']
-        self.set_params(**params)
+        self.model_type = state['model_type']
+        self.num_labels = state['num_labels']
+        self.do_lower_case = state['do_lower_case']
         self.input_text_pairs = state['input_text_pairs']
         self.id2label = state['id2label']
         self.label2id = state['label2id']
 
-    def tune_params(self,
-                    X_train, y_train,
-                    X_val, y_val,
-                    learning_rate=None,
-                    epochs=None,
-                    train_batch_size=None,
-                    max_seq_length=None,
-                    num_mlp_layers=None,
-                    rand_states=None):
-        """
-        Tune model over parameter grid.
+        params = state['params']
+        self.set_params(**params)
 
-        The Google BERT paper recommends searching over:
-            train_batch_size = [16, 32]
-            learning rate = [5e-5, 3e-5, 2e-5]
-            epochs = [3, 4]
+        # get tokenizers
+        self.load_tokenizer()
 
-        For larger datasets I think its worth trying the MLP with:
-            num_mlp_layers = [0, 1, 4]
-        """
-
-        if learning_rate is None:
-            learning_rate = [5e-5, 3e-5, 2e-5]
-
-        if epochs is None:
-            epochs = [3, 4]
-
-        if train_batch_size is None:
-            train_batch_size = [16]
-
-        if max_seq_length is None:
-            max_seq_length = [96]
-
-        if num_mlp_layers is None:
-            num_mlp_layers = [0]
-
-        if rand_states is None:
-            rand_states = [42, 134, 6, 8]
-
-        params = ParameterGrid({
-            'learning_rate': learning_rate,
-            'epochs': epochs,
-            'train_batch_size': train_batch_size,
-            'max_seq_length': max_seq_length,
-            'num_mlp_layers': num_mlp_layers,
-        })
-
-        scores = {}
-
-        # loop over all parameter combinations
-        for param in params:
-            param_list = tuple(param.items())
-            scores[param_list] = []
-            print("="*60)
-            for k, v in param.items():
-                print("%s: %r"%(k, v))
-            print("="*60)
-            # loop over random states
-            for r in rand_states:
-                print("Using random seed :", r)
-                if self.model_type == 'classifier':
-                    model = BertClassifier(**param)
-                elif self.model_type == 'regressor':
-                    model = BertRegressor(**param)
-
-                model.validation_fraction = 0
-                model.random_state = r
-
-                #fit and score model
-                model.fit(X_train, y_train)
-                score = model.score(X_val, y_val)
-                scores[param_list].append(score)
-                print("score: %0.2f\n"%(score))
-
-        # print results
-        for param, score in scores.items():
-            if len(score) > 1:
-                mean = stats.mean(score)
-                std = stats.stdev(score)
-                print("%0.3f (+/-%0.03f) for %s"% (mean, std * 2, dict(param)))
-
-        # find best model
-        lis = [(stats.mean(score), dict(param), score) for param, score in scores.items()]
-        best_score, best_param, best_scores = max(lis, key=lambda item: item[0])
-        print("Best mean score is %0.2f, with params: %s"%(best_score, str(best_param)))
-
-        #refit model with best params
-        if self.model_type == 'classifier':
-            model = BertClassifier(**best_param)
-        elif self.model_type == 'regressor':
-            self.model = BertRegressor(**best_param)
-        model.validation_fraction = 0
-
-        # choose the best random_state
-        idx = best_scores.index(max(best_scores))
-        model.random_state = rand_states[idx]
-
-        # fit best model
-        model.fit(X_train, y_train)
-
-        return {'best_model': model, 'best_param': best_param,
-                'best_score': best_score, 'scores': scores}
+        # load bert with finetuned weights
+        self.load_bert(state_dict=state['state_dict'])
 
 
 class BertClassifier(BaseBertEstimator, ClassifierMixin):
     """
-    A classifier built on top of a pretrained Bert model.
+    A text classifier built on top of a pretrained Bert model.
     """
 
-    def predict_proba(self, X, use_cuda=True):
+    def predict_proba(self, X):
         """
         Make class probability predictions.
+
+        Parameters
+        ----------
+        X : 1D or 2D list-like of strings
+            Input text or text pairs
+            
+        Returns
+        ----------
+        probs: numpy 2D array of floats
+            probability estimates for each class
         """
 
-        X = np.squeeze(to_numpy(X))
-        texts_a, texts_b = unpack_text_pairs(X)
+        texts_a, texts_b = unpack_data(X)
 
-        dataloader, device = self.setup_eval(texts_a, texts_b, None, use_cuda)
+        dataloader, config = self.setup_eval(texts_a, texts_b, labels=None)
+        device = config.device
+
         probs = []
         batch_iter = tqdm(dataloader, desc="Predicting", leave=False)
         for batch in batch_iter:
@@ -579,29 +481,48 @@ class BertClassifier(BaseBertEstimator, ClassifierMixin):
             probs.append(prob)
         return np.vstack(tuple(probs))
 
-    def predict(self, X, use_cuda=True):
+    def predict(self, X):
         """
         Predict most probable class.
+
+        Parameters
+        ----------
+        X : 1D or 2D list-like of strings
+            Input text, or text pairs
+
+        Returns
+        ----------
+        y_pred: numpy array of strings
+            predicted class estimates
         """
-        y_pred = np.argmax(self.predict_proba(X, use_cuda=use_cuda), axis=1)
+        y_pred = np.argmax(self.predict_proba(X), axis=1)
         y_pred = np.array([self.id2label[y] for y in y_pred])
         return y_pred
 
 
 class BertRegressor(BaseBertEstimator, RegressorMixin):
     """
-    A regressor built on top of a pretrained Bert model.
+    A text regressor built on top of a pretrained Bert model.
     """
-
-    def predict(self, X, use_cuda=True):
+    def predict(self, X):
         """
         Predict method for regression.
+
+        Parameters
+        ----------
+        X : 1D or 2D list-like of strings
+            Input text, or text pairs
+            
+        Returns
+        ----------
+        y_pred: 1D numpy array of float
+            predicted regressor float value
         """
 
-        X = np.squeeze(to_numpy(X))
-        texts_a, texts_b = unpack_text_pairs(X)
+        texts_a, texts_b = unpack_data(X)
 
-        dataloader, device = self.setup_eval(texts_a, texts_b, None, use_cuda)
+        dataloader, config = self.setup_eval(texts_a, texts_b, labels=None)
+        device = config.device
 
         ypred_list = []
         batch_iter = tqdm(dataloader, desc="Predicting", leave=False)
@@ -614,16 +535,227 @@ class BertRegressor(BaseBertEstimator, RegressorMixin):
         return y_pred
 
 
+class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
+    """
+    A token sequence classifier built on top of a pretrained Bert model.
+    """
+    def get_max_token_len(self, token_list):
+        """
+        Get max length of bert tokens for a token list
+
+        Parameters
+        ----------
+        token_list: list of list of token strings
+        """
+        if self.tokenizer is None:
+            self.load_tokenizer()
+
+        bert_token_lengths = [len(flatten([self.tokenizer.tokenize(token) for token in tokens]))
+                              for tokens in token_list]
+
+        return np.max(bert_token_lengths)
+
+    def predict_proba(self, X):
+        """
+        Make class probability predictions.
+
+        Parameters
+        ----------
+        X : 2D list of list of token strings
+        
+        Returns
+        ----------
+        y_probs: 3D numpy array of floats
+            probability estimates for each tag in for each token in each 
+            input token list in X
+        """
+        y_probs = []
+
+        texts_a, texts_b = to_numpy(X), None
+        dataloader, config = self.setup_eval(texts_a, texts_b, labels=None)
+        device = config.device
+
+        batch_iter = tqdm(dataloader, desc="Predicting", leave=False)
+
+        for batch in batch_iter:
+            # get the token_starts mask from batch
+            x1, x2, x3, token_starts_mask = batch
+
+            # put BERT input features onto device
+            batch = (x1, x2, x3)
+            batch = tuple(t.to(device) for t in batch)
+            with torch.no_grad():
+                logits = self.model(*batch)
+
+            # valid tokens are where mask is '1'
+            logits = logits[token_starts_mask == 1]
+
+            # calculate the original token list lengths from token_starts mask
+            lengths = torch.sum(token_starts_mask, 1)
+
+            # softmax over logits
+            y_prob = F.softmax(logits, dim=-1)
+
+            # to numpy
+            y_prob = y_prob.detach().cpu().numpy()
+
+            # re-assemble the tokens based on the lengths
+            start = 0
+            for length in  lengths:
+                y_probs.append(y_prob[start:start + length])
+                start += length
+
+        # predict majority label for any tokens that have been truncated by max_seq_len
+        for i, (x, y_prob) in enumerate(zip(X, y_probs)):
+            if len(x) > len(y_prob):
+
+                # create rows for all the truncated tokens with prob=1
+                # for majority_label/majority_id
+                y_prob_xtra = np.zeros_like(y_prob[-1])
+                y_prob_xtra[self.majority_id] = 1.0
+
+                length = len(x) - len(y_prob)
+                y_prob_xtra = np.tile(y_prob_xtra, (length, 1))
+
+                y_probs[i] = np.vstack((y_prob, y_prob_xtra))
+        return y_probs
+
+    def predict(self, X):
+        """
+        Make most probable class prediction on input data.
+
+        Parameters
+        ----------
+        X : 2D list of list of token strings
+        
+        Returns
+        ----------
+        y_preds: 2D numpy array of string
+            predicted tag for each token in each input token list 
+        """
+        y_preds = []
+
+        texts_a, texts_b = to_numpy(X), None
+        dataloader, config = self.setup_eval(texts_a, texts_b, labels=None)
+        device = config.device
+
+        batch_iter = tqdm(dataloader, desc="Predicting", leave=False)
+
+        for batch in batch_iter:
+            # peel off the token_starts mask from batch
+            x1, x2, x3, token_starts_mask = batch
+
+            # put BERT input features onto device
+            batch = (x1, x2, x3)
+            batch = tuple(t.to(device) for t in batch)
+            with torch.no_grad():
+                logits = self.model(*batch)
+
+            # valid tokens are where mask is '1'
+            logits = logits[token_starts_mask == 1]
+
+            # calculate the original token list lengths from token_starts mask
+            lengths = torch.sum(token_starts_mask, 1)
+
+            # get predicts
+            _, y_pred = torch.max(logits, 1)
+            y_pred = y_pred.detach().cpu().numpy()
+
+            # convert to class_ids to class labels
+            y_pred = [self.id2label[y_i] for y_i in y_pred]
+
+            # re-assemble the tokens into their original input form from the lengths
+            start = 0
+            for length in  lengths:
+                y_preds.append(y_pred[start:start + length])
+                start += length
+
+        # predict majority label for any tokens that have been truncated by max_seq_len
+        for x, y in zip(X, y_preds):
+            if len(x) > len(y):
+                y.extend([self.majority_label] * (len(x) - len(y)))
+        return y_preds
+
+    def score(self, X, y):
+        """
+        Score model on test/eval data.
+
+        Parameters
+        ----------
+        X : 2D list of list of token strings 
+        y : 2D list of list of token tags/labels
+
+        Returns
+        ----------
+        f1: float
+            f1 wrt to the ignore_labels i.e 'O' for NER
+        """ 
+
+        y_preds = self.predict(X)
+        label_list = self.label_list
+
+        if self.ignore_label is not None:
+            label_list = list(set(label_list) - set(self.ignore_label))
+
+        f1 = 100 * f1_score(flatten(y), flatten(y_preds), average='micro', labels=label_list)
+        return f1
+
+
+    def tokens_proba(self, tokens, prob=None, verbose=True):
+        """
+        Print tag probabilities for each token.
+        """
+        if prob is None:
+            prob = self.predict_proba([tokens])
+            prob = np.array(prob)[0]
+        if verbose:
+            cols = list(self.id2label.values())
+            pd.set_option('display.float_format', lambda x: '%.2f' % x)
+            df = pd.DataFrame(prob, columns=cols)
+            df.insert(0, "token", tokens)
+            print(df)
+        return prob
+
+    def tag_text_proba(self, text, verbose=True):
+        """
+        Tokenize text and print tag probabilities for each token.
+        """
+        tokens = self.basic_tokenizer.tokenize(text)
+        return self.tokens_proba(tokens, verbose=verbose)
+
+    def tag_text(self, text, verbose=True):
+        """
+        Tokenize text and print most probable token tags.
+        """
+        tokens = self.basic_tokenizer.tokenize(text)
+        tags = self.predict(np.array([tokens]))[0]
+        if verbose:
+            data = {"token": tokens, "predicted tags": tags}
+            df = pd.DataFrame(data=data)
+            print(df)
+        return tags
+
+
 def load_model(filename):
     """
-    Load BertClassifier or BertRegressor from a disk file.
+    Load BertClassifier, BertRegressor, or BertTokenClassifier from a disk file.
+    
+        Parameters
+        ----------
+        filename : string
+            filename of saved model file
+
+        Returns
+        ----------
+        model : BertClassifier, BertRegressor, or BertTokenClassifier model
     """
     state = torch.load(filename)
     class_name = state['class_name']
 
     classes = {
         'BertClassifier': BertClassifier,
-        'BertRegressor' : BertRegressor}
+        'BertRegressor' : BertRegressor,
+        'BertTokenClassifier' : BertTokenClassifier}
 
     # call the constructor to load the model
     model_ctor = classes[class_name]
