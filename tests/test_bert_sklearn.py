@@ -9,6 +9,7 @@ from sklearn.metrics import classification_report
 
 from bert_sklearn import BertClassifier
 from bert_sklearn import BertRegressor
+from bert_sklearn import BertTokenClassifier
 from bert_sklearn import load_model
 
 DATADIR = 'tests/data'
@@ -21,22 +22,41 @@ def teardown_function(function):
     print ("")
 
 
-def get_sst_data(train_file=DATADIR + '/sst2/train.tsv', 
-                 dev_file=DATADIR + '/sst2/dev.tsv'):
+def read_CoNLL2003_format(filename, idx=3):
+    """Read file in CoNLL-2003 shared task format"""
+    
+    # read file
+    lines =  open(filename).read().strip()
+    
+    # find sentence-like boundaries
+    lines = lines.split("\n\n")  
+    
+     # split on newlines
+    lines = [line.split("\n") for line in lines]
+    
+    # get tokens
+    tokens = [[l.split()[0] for l in line] for line in lines]
+    
+    # get labels/tags
+    labels = [[l.split()[idx] for l in line] for line in lines]
+    
+    #convert to df
+    data= {'tokens': tokens, 'labels': labels}
+    df = pd.DataFrame(data=data)
+    
+    return df
 
-    train = pd.read_csv(train_file, sep='\t',  encoding='utf8', keep_default_na=False)
+
+def sst2_test_data(train_file=DATADIR + '/sst2/train.tsv', 
+                   dev_file=DATADIR + '/sst2/dev.tsv'):
+                   
+    train = pd.read_csv(train_file, sep='\t', encoding='utf8', keep_default_na=False)
     train.columns=['text','label']
 
-    dev = pd.read_csv(dev_file, sep='\t',  encoding='utf8', keep_default_na=False)
+    dev = pd.read_csv(dev_file, sep='\t', encoding='utf8', keep_default_na=False)
     dev.columns=['text', 'label']
 
     label_list = np.unique(train['label'])
-
-    return train, dev, label_list   
-
-
-def sst2_test_data():
-    train,dev,label_list = get_sst_data()
 
     X_train = train['text']
     y_train = train['label']
@@ -65,9 +85,9 @@ def test_bert_sklearn_accy():
     model.eval_batch_size = 8
     model.epochs = 2
 
-    model.fit(X_train,y_train)
+    model.fit(X_train, y_train)
 
-    bert_sklearn_accy = model.score(X_dev,y_dev)
+    bert_sklearn_accy = model.score(X_dev, y_dev)
     bert_sklearn_accy /= 100
 
     # run huggingface BERT run_classifier and check we get the same accuracy
@@ -104,19 +124,19 @@ def test_bert_sklearn_accy():
 def test_save_load_model():
     """Test saving/loading a fitted model to disk"""
 
-    X_train,y_train,X_dev,y_dev = sst2_test_data()
+    X_train, y_train, X_dev, y_dev = sst2_test_data()
 
     model = BertClassifier()
     model.max_seq_length = 64
     model.train_batch_size = 8
     model.epochs= 1
 
-    model.fit(X_train,y_train)
+    model.fit(X_train, y_train)
 
-    accy1 = model.score(X_dev,y_dev)
+    accy1 = model.score(X_dev, y_dev)
 
     savefile='./test_model_save.bin'
-    print("\nSaving model to ",savefile)
+    print("\nSaving model to ", savefile)
 
     model.save(savefile)
 
@@ -150,24 +170,23 @@ def test_regression():
     model.eval_batch_size = 8
     model.epochs = 1
 
-    model.fit(X_train,y_train)
+    model.fit(X_train, y_train)
 
-    accy = model.score(X_train,y_train)
+    accy = model.score(X_train, y_train)
 
     assert accy <= 100
     
 
 def test_nonbinary_classify():
-    """Test non-binary classification w list inputs"""
+    """Test non-binary classification with different inputs"""
 
     train = pd.read_csv(DATADIR + "/mnli/train.csv")
     X_train = train[['text_a','text_b']]
     y_train = train['label']
 
-    X_train = list(X_train.values)
-    y_train = list(y_train.values)
+    #X_train = list(X_train.values)
+    #y_train = list(y_train.values)
 
-    # define model
     model = BertClassifier()
     model.validation_fraction = 0.0
     model.max_seq_length = 64
@@ -175,15 +194,59 @@ def test_nonbinary_classify():
     model.eval_batch_size = 8
     model.epochs = 1
 
-    model.fit(X_train,y_train)
+    model.fit(X_train, y_train)
+    accy = model.score(X_train, y_train)
 
-    accy = model.score(X_train,y_train)
+    # pandas df input
+    X = X_train[:5]    
+    print("testing %s input"%(type(X)))
+    y1 = model.predict(X)
 
-    assert accy <= 100
+    # numpy array input
+    X = X_train[:5].values
+    print("testing %s input"%(type(X)))
+    y2 = model.predict(X)
+    assert list(y2) == list(y1)
+
+    # list input
+    X = list(X_train[:5].values)
+    print("testing %s input"%(type(X)))
+    y3 = model.predict(X)
+    assert list(y3) == list(y1)
+
+
+def test_ner():
+    """Test Token Classifier with NER data"""
+
+    DATADIR = 'tests/data'
+    filename = DATADIR + '/ner/test.txt'
+    data = read_CoNLL2003_format(filename)
+
+    X = data.tokens
+    y = data.labels
+
+    model = BertTokenClassifier(epochs=1,
+                                train_batch_size=16,
+                                max_seq_length=64,
+                                ignore_label = ['O'],
+                                validation_fraction = 0)
+    # fit model
+    model = model.fit(X, y)
+
+    # score model
+    model.score(X, y)
+
+    # predict on a token list longer than 64
+    n = 100
+    x = [str(i) for i in range(n)]
+    y = model.predict(x)
+
+    # check we get a prediction even on truncated tokens
+    assert len(y) == n
 
 
 """
-# longer tests...    
+
 def test_large_model_load():
     
     X_train,y_train, X_dev, y_dev =  sst2_test_data()

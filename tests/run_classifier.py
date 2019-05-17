@@ -40,10 +40,19 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
 
+"""
 from pytorch_pretrained_bert.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from pytorch_pretrained_bert.modeling import BertForSequenceClassification, BertConfig, WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.optimization import BertAdam, warmup_linear
+"""
+
+sys.path.append(".")
+from bert_sklearn.model.pytorch_pretrained import PYTORCH_PRETRAINED_BERT_CACHE
+from bert_sklearn.model.pytorch_pretrained import BertForSequenceClassification, BertConfig, WEIGHTS_NAME, CONFIG_NAME
+from bert_sklearn.model.pytorch_pretrained  import BertTokenizer
+from bert_sklearn.model.pytorch_pretrained  import BertAdam, warmup_linear
+
 
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
