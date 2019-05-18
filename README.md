@@ -106,6 +106,15 @@ NER results for [**`CoNLL-2003`**](https://www.clips.uantwerpen.be/conll2003/ner
 | BERT paper| 96.4 | 92.4|
 | bert-sklearn | 96.04 | 91.97|
 
+Span level stats on test:
+```bash
+processed 46666 tokens with 5648 phrases; found: 5740 phrases; correct: 5173.
+accuracy:  98.15%; precision:  90.12%; recall:  91.59%; FB1:  90.85
+              LOC: precision:  92.24%; recall:  92.69%; FB1:  92.46  1676
+             MISC: precision:  78.07%; recall:  81.62%; FB1:  79.81  734
+              ORG: precision:  87.64%; recall:  90.07%; FB1:  88.84  1707
+              PER: precision:  96.00%; recall:  96.35%; FB1:  96.17  1623
+```
 See [ner_english](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/ner_english.ipynb) for a demo using `'bert-base-cased'` model.
 
 ## Other examples
