@@ -42,6 +42,9 @@ model = BertClassifier(
 
 `num_mlp_hiddens`: the number of hidden neurons in each layer of the mlp. Default: 500
 
+`ignore_label`: labels to be excluded when calculating f1 for BertTokenClassifier. Default: None
+
+
 ### training/finetuning options
 
 `learning_rate`: inital learning rate of Bert Optimizer. Default: 2e-5
