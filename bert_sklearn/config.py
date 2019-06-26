@@ -99,9 +99,9 @@ class FinetuneConfig:
             self.ignore_label_id = np.array(self.ignore_label_id)
 
     def __repr__(self):
-        attrs = ["%s=%s"%(key, val) for key, val in vars(self).items()]
-        attrs = ",".join(attrs)
-        return f'{self.__class__.__name__}({attrs})'
+        attrs = ['{}={}'.format(key, val) for key, val in vars(self).items()]
+        attrs = ','.join(attrs)
+        return '{}({})'.format(self.__class__.__name__, attrs)
 
 
 def model2config(model):
