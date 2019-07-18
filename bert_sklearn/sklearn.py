@@ -41,19 +41,20 @@ Model inputs X, y:
         y = 2D list-like of token tags
 """
 
+import sys
 import logging
 from collections import Counter
 
-import statistics as stats
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
+from tqdm import tqdm, tqdm_notebook
 import torch
 import torch.nn.functional as F
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from sklearn.base import is_classifier
-from sklearn.model_selection import ParameterGrid
 from sklearn.metrics import f1_score
+from sklearn.utils.validation import  check_is_fitted
+from sklearn.exceptions import NotFittedError
 
 from .config import model2config
 from .data import get_test_dl
@@ -68,15 +69,23 @@ from .utils import to_numpy
 from .utils import unpack_data
 from .finetune import finetune
 from .finetune import eval_model
-
+from .model.pytorch_pretrained.modeling import PRETRAINED_MODEL_ARCHIVE_MAP
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 
-SUPPORTED_MODELS = ('bert-base-uncased', 'bert-large-uncased', 'bert-base-cased',
-                    'bert-large-cased', 'bert-base-multilingual-uncased',
-                    'bert-base-multilingual-cased', 'bert-base-chinese')
+SUPPORTED_MODELS = list(PRETRAINED_MODEL_ARCHIVE_MAP.keys())
+
+
+try:
+    import google.colab
+    IN_COLAB = True
+    pbar = tqdm_notebook
+except ModuleNotFoundError:
+    IN_COLAB = False
+    pbar = tqdm
+
 
 
 class BaseBertEstimator(BaseEstimator):
@@ -85,8 +94,17 @@ class BaseBertEstimator(BaseEstimator):
 
     Parameters
     ----------
-    bert_model : string
-        one of SUPPORTED_MODELS, i.e 'bert-base-uncased', 'bert-large-uncased'...
+    bert_model : string, either
+        - one of SUPPORTED_MODELS, i.e 'bert-base-uncased', 'bert-large-uncased'...
+        - path to an optional file containing pytorch or tensorflow model weights to load
+    bert_config_json : string
+        path to an optional file containg BERT model configuration in json
+    bert_vocab_file : string
+        path to an optional file containg bert vocabulary to initialize the tokenizer
+    from_tf : bool
+        if the  bert_model is a tensorflow checkpoint that needs to be converted
+    do_lower_case : bool
+        inform the BERT tokenizer to lowercase all strings before tokenizing
     num_mlp_hiddens : int
         the number of hidden neurons in each layer of the mlp
     num_mlp_layers : int
@@ -128,7 +146,9 @@ class BaseBertEstimator(BaseEstimator):
     ignore_label : list of strings
         Labels to be ignored when calculating f1 for token classifiers
     """
-    def __init__(self, label_list=None, bert_model='bert-base-uncased',
+    def __init__(self, bert_model='bert-base-uncased',
+                 bert_config_json=None, bert_vocab=None,
+                 from_tf=False, do_lower_case=None, label_list=None,
                  num_mlp_hiddens=500, num_mlp_layers=0, restore_file=None,
                  epochs=3, max_seq_length=128, train_batch_size=32,
                  eval_batch_size=8, learning_rate=2e-5, warmup_proportion=0.1,
@@ -140,8 +160,12 @@ class BaseBertEstimator(BaseEstimator):
         self.id2label, self.label2id = {}, {}
         self.input_text_pairs = None
 
-        self.label_list = label_list
         self.bert_model = bert_model
+        self.bert_config_json = bert_config_json
+        self.bert_vocab = bert_vocab
+        self.from_tf = from_tf
+        self.do_lower_case = do_lower_case
+        self.label_list = label_list
         self.num_mlp_hiddens = num_mlp_hiddens
         self.num_mlp_layers = num_mlp_layers
         self.restore_file = restore_file
@@ -161,10 +185,7 @@ class BaseBertEstimator(BaseEstimator):
         self.logfile = logfile
         self.ignore_label = ignore_label
         self.majority_label = None
-
-        # a BertPlusMLP model and BertTokenizer will be loaded during fit()
-        self.model = None
-        self.tokenizer = None
+        self.majority_id = None
 
         # if given a restore_file, then finish loading a previously finetuned
         # model. Normally a user wouldn't do this directly. This is called from
@@ -172,12 +193,10 @@ class BaseBertEstimator(BaseEstimator):
         if restore_file is not None:
             self.restore_finetuned_model(restore_file)
 
-        # the sklearn convention is to only call validate_params in fit, but I
-        # feel like it should be in init as well
         self._validate_hyperparameters()
 
         # not good to use 'isinstance' :-( but the init code for these
-        # classes are identical. So keep the ugly hack for now...
+        # classes are similar. So keep the ugly hack for now...
         if isinstance(self, BertClassifier):
             print("Building sklearn text classifier...")
             self.model_type = "text_classifier"
@@ -196,14 +215,14 @@ class BaseBertEstimator(BaseEstimator):
         """
         Load Basic and BERT Wordpiece Tokenizers
         """
-        # use lower case for uncased models
-        self.do_lower_case = True if 'uncased' in self.bert_model else False
+        if self.do_lower_case is None:
+            self.do_lower_case = True if 'uncased' in self.bert_model else False
 
         # get basic tokenizer
         self.basic_tokenizer = get_basic_tokenizer(self.do_lower_case)
 
         # get bert wordpiece tokenizer
-        self.tokenizer = get_tokenizer(self.bert_model, self.do_lower_case)
+        self.tokenizer = get_tokenizer(self.bert_model, self.bert_vocab, self.do_lower_case)
 
         return self.tokenizer
 
@@ -211,13 +230,14 @@ class BaseBertEstimator(BaseEstimator):
         """
         Load a BertPlusMLP model from a pretrained checkpoint.
 
-        This will be an pretrained BERT ready to be finetuned.
+        This will be a pretrained BERT ready to be finetuned.
         """
 
         # load a vanilla bert model ready to finetune:
         # pretrained bert LM + untrained classifier/regressor
-
         self.model = get_model(bert_model=self.bert_model,
+                               bert_config_json=self.bert_config_json,
+                               from_tf=self.from_tf,
                                num_labels=self.num_labels,
                                model_type=self.model_type,
                                num_mlp_layers=self.num_mlp_layers,
@@ -229,9 +249,12 @@ class BaseBertEstimator(BaseEstimator):
         """
         Check hyperpameters are within allowed values.
         """
-        if self.bert_model not in SUPPORTED_MODELS:
-            raise ValueError("The bert model '%s' is not supported. Supported "
-                             "models are %s." % (self.bert_model, SUPPORTED_MODELS))
+        if (self.bert_config_json is None) or (self.bert_vocab is None):
+            # if bert_config_json and bert_vocab is not specified, then
+            # bert_model must be one of the pretrained downloadable models
+            if self.bert_model not in SUPPORTED_MODELS:
+                raise ValueError("The bert model '%s' is not supported. The list of supported "
+                                 "models is %s." % (self.bert_model, SUPPORTED_MODELS))
 
         if (not isinstance(self.num_mlp_hiddens, int) or self.num_mlp_hiddens < 1):
             raise ValueError("num_mlp_hiddens must be an integer >= 1, got %s"%
@@ -311,7 +334,6 @@ class BaseBertEstimator(BaseEstimator):
         self.input_text_pairs = not texts_b is None
 
         if is_classifier(self):
-
             # if the label_list not specified, then infer it from training data
             if self.label_list is None:
                 if self.model_type == "text_classifier":
@@ -331,7 +353,6 @@ class BaseBertEstimator(BaseEstimator):
                 self.majority_label = c.most_common()[0][0]
                 self.majority_id = self.label2id[self.majority_label]
 
-        # load model and tokenizer from checkpoint
         if load_at_start:
             self.load_tokenizer()
             self.load_bert()
@@ -369,7 +390,7 @@ class BaseBertEstimator(BaseEstimator):
     def score(self, X, y, verbose=True):
         """
         Score model on test/eval data.
-        
+
         Parameters
         ----------
         X : 1D or 2D list-like of strings
@@ -381,8 +402,13 @@ class BaseBertEstimator(BaseEstimator):
         Returns
         ----------
         accy: float
-            classification accuracy, or pearson for regression     
+            classification accuracy, or pearson for regression
+
+        Raises
+        ----------
+        NotFittedError - if model has not been fitted yet
         """
+        check_is_fitted(self, ["model", "tokenizer"])
         texts_a, texts_b, labels = unpack_data(X, y)
 
         dataloader, config = self.setup_eval(texts_a, texts_b, labels)
@@ -395,7 +421,6 @@ class BaseBertEstimator(BaseEstimator):
             if 'f1' in res:
                 msg += ", f1: %0.02f"%(100 * res['f1'])
             print(msg)
-
         return accy
 
     def save(self, filename):
@@ -405,6 +430,9 @@ class BaseBertEstimator(BaseEstimator):
         # Only save the model it-self
         model_to_save = self.model.module if hasattr(self.model, 'module') else self.model
 
+        bert_config_json = model_to_save.config.to_dict()
+        bert_vocab = self.tokenizer.vocab
+
         state = {
             'params': self.get_params(),
             'class_name' : type(self).__name__,
@@ -413,6 +441,8 @@ class BaseBertEstimator(BaseEstimator):
             'id2label'   : self.id2label,
             'label2id'   : self.label2id,
             'do_lower_case': self.do_lower_case,
+            'bert_config_json' : bert_config_json,
+            'bert_vocab'  : bert_vocab,
             'state_dict' : model_to_save.state_dict(),
             'input_text_pairs' : self.input_text_pairs
         }
@@ -428,20 +458,22 @@ class BaseBertEstimator(BaseEstimator):
         print("Loading model from %s..."%(restore_file))
         state = torch.load(restore_file)
 
+        params = state['params']
+        self.set_params(**params)
+
         self.model_type = state['model_type']
         self.num_labels = state['num_labels']
         self.do_lower_case = state['do_lower_case']
+        self.bert_config_json = state['bert_config_json']
+        self.bert_vocab = state['bert_vocab']
+        self.from_tf = False
+        self.num_labels = state['num_labels']
         self.input_text_pairs = state['input_text_pairs']
         self.id2label = state['id2label']
         self.label2id = state['label2id']
 
-        params = state['params']
-        self.set_params(**params)
-
-        # get tokenizers
+        # get tokenizer and model
         self.load_tokenizer()
-
-        # load bert with finetuned weights
         self.load_bert(state_dict=state['state_dict'])
 
 
@@ -458,20 +490,26 @@ class BertClassifier(BaseBertEstimator, ClassifierMixin):
         ----------
         X : 1D or 2D list-like of strings
             Input text or text pairs
-            
+
         Returns
         ----------
         probs: numpy 2D array of floats
             probability estimates for each class
-        """
 
+        Raises
+        ----------
+        NotFittedError - if model has not been fitted yet
+        """
+        check_is_fitted(self, ["model", "tokenizer"])
         texts_a, texts_b = unpack_data(X)
 
         dataloader, config = self.setup_eval(texts_a, texts_b, labels=None)
         device = config.device
 
         probs = []
-        batch_iter = tqdm(dataloader, desc="Predicting", leave=False)
+        sys.stdout.flush()
+        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+
         for batch in batch_iter:
             batch = tuple(t.to(device) for t in batch)
             with torch.no_grad():
@@ -479,6 +517,7 @@ class BertClassifier(BaseBertEstimator, ClassifierMixin):
                 prob = F.softmax(logits, dim=-1)
             prob = prob.detach().cpu().numpy()
             probs.append(prob)
+        sys.stdout.flush()
         return np.vstack(tuple(probs))
 
     def predict(self, X):
@@ -494,6 +533,10 @@ class BertClassifier(BaseBertEstimator, ClassifierMixin):
         ----------
         y_pred: numpy array of strings
             predicted class estimates
+
+        Raises
+        ----------
+        NotFittedError - if model has not been fitted yet
         """
         y_pred = np.argmax(self.predict_proba(X), axis=1)
         y_pred = np.array([self.id2label[y] for y in y_pred])
@@ -512,20 +555,26 @@ class BertRegressor(BaseBertEstimator, RegressorMixin):
         ----------
         X : 1D or 2D list-like of strings
             Input text, or text pairs
-            
+
         Returns
         ----------
         y_pred: 1D numpy array of float
             predicted regressor float value
-        """
 
+        Raises
+        ----------
+        NotFittedError - if model has not been fitted yet
+        """
+        check_is_fitted(self, ["model", "tokenizer"])
         texts_a, texts_b = unpack_data(X)
 
         dataloader, config = self.setup_eval(texts_a, texts_b, labels=None)
         device = config.device
 
         ypred_list = []
-        batch_iter = tqdm(dataloader, desc="Predicting", leave=False)
+        sys.stdout.flush()
+        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+
         for batch in batch_iter:
             batch = tuple(t.to(device) for t in batch)
             with torch.no_grad():
@@ -547,7 +596,10 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         ----------
         token_list: list of list of token strings
         """
-        if self.tokenizer is None:
+        # check if the BERT wordpiece tokenizer has been loaded, if not load it
+        try:
+            check_is_fitted(self, ["tokenizer"])
+        except NotFittedError:
             self.load_tokenizer()
 
         bert_token_lengths = [len(flatten([self.tokenizer.tokenize(token) for token in tokens]))
@@ -562,20 +614,27 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         Parameters
         ----------
         X : 2D list of list of token strings
-        
+
         Returns
         ----------
         y_probs: 3D numpy array of floats
-            probability estimates for each tag in for each token in each 
+            probability estimates for each tag for each token in each
             input token list in X
+
+        Raises
+        ----------
+        NotFittedError - if model has not been fitted yet
         """
+        check_is_fitted(self, ["model", "tokenizer"])
+
         y_probs = []
 
         texts_a, texts_b = to_numpy(X), None
         dataloader, config = self.setup_eval(texts_a, texts_b, labels=None)
         device = config.device
 
-        batch_iter = tqdm(dataloader, desc="Predicting", leave=False)
+        sys.stdout.flush()
+        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
 
         for batch in batch_iter:
             # get the token_starts mask from batch
@@ -627,19 +686,25 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         Parameters
         ----------
         X : 2D list of list of token strings
-        
+
         Returns
         ----------
         y_preds: 2D numpy array of string
-            predicted tag for each token in each input token list 
-        """
-        y_preds = []
+            predicted tag for each token in each input token list
 
+        Raises
+        ----------
+        NotFittedError - if model has not been fitted yet
+        """
+        check_is_fitted(self, ["model", "tokenizer"])
+
+        y_preds = []
         texts_a, texts_b = to_numpy(X), None
         dataloader, config = self.setup_eval(texts_a, texts_b, labels=None)
         device = config.device
 
-        batch_iter = tqdm(dataloader, desc="Predicting", leave=False)
+        sys.stdout.flush()
+        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
 
         for batch in batch_iter:
             # peel off the token_starts mask from batch
@@ -676,28 +741,33 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
                 y.extend([self.majority_label] * (len(x) - len(y)))
         return y_preds
 
-    def score(self, X, y):
+    def score(self, X, y, average='micro'):
         """
         Score model on test/eval data.
 
         Parameters
         ----------
-        X : 2D list of list of token strings 
+        X : 2D list of list of token strings
         y : 2D list of list of token tags/labels
-
+        average : str, , [None, 'binary' (default), 'micro', 'macro', 'samples', 'weighted']
+            sklearn.metrics.f1_score parameter to determine how to scores across
+            multiple classes
         Returns
         ----------
         f1: float
             f1 wrt to the ignore_labels i.e 'O' for NER
-        """ 
 
+        Raises
+        ----------
+        NotFittedError - if model has not been fitted yet
+        """
         y_preds = self.predict(X)
         label_list = self.label_list
 
         if self.ignore_label is not None:
             label_list = list(set(label_list) - set(self.ignore_label))
 
-        f1 = 100 * f1_score(flatten(y), flatten(y_preds), average='micro', labels=label_list)
+        f1 = 100 * f1_score(flatten(y), flatten(y_preds), average=average, labels=label_list)
         return f1
 
 
@@ -713,7 +783,10 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
             pd.set_option('display.float_format', lambda x: '%.2f' % x)
             df = pd.DataFrame(prob, columns=cols)
             df.insert(0, "token", tokens)
-            print(df)
+            if IN_COLAB:
+                print('\n',df) # fix formatting in google colab
+            else:
+                print(df)
         return prob
 
     def tag_text_proba(self, text, verbose=True):
@@ -729,17 +802,20 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         """
         tokens = self.basic_tokenizer.tokenize(text)
         tags = self.predict(np.array([tokens]))[0]
-        if verbose:
+        if verbose:                
             data = {"token": tokens, "predicted tags": tags}
             df = pd.DataFrame(data=data)
-            print(df)
+            if IN_COLAB:
+                print('\n',df) # fix formatting in google colab
+            else:
+                print(df)
         return tags
 
 
 def load_model(filename):
     """
     Load BertClassifier, BertRegressor, or BertTokenClassifier from a disk file.
-    
+
         Parameters
         ----------
         filename : string

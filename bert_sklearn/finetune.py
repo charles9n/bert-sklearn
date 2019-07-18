@@ -23,7 +23,7 @@ Overall flow:
 import sys
 
 import numpy as np
-from tqdm import tqdm
+from tqdm import tqdm, tqdm_notebook
 import torch
 
 from .data import get_train_val_dl
@@ -32,6 +32,14 @@ from .utils import get_optimizer
 from .utils import update_learning_rate
 from .utils import OnlinePearson
 from .utils import OnlineF1
+
+try:
+    import google.colab
+    IN_COLAB = True
+    pbar = tqdm_notebook
+except ModuleNotFoundError:
+    IN_COLAB = False
+    pbar = tqdm
 
 
 def finetune(model, X1, X2, y, config):
@@ -72,6 +80,9 @@ def finetune(model, X1, X2, y, config):
         if logger:
             logger.info(msg)
         if console:
+            # in colab this looks nicer
+            if IN_COLAB:
+                msg = "\n" + msg + "\n"
             print(msg)
             sys.stdout.flush()
 
@@ -91,7 +102,7 @@ def finetune(model, X1, X2, y, config):
 
     # get and prepare BertAdam optimizer
     params = list(model.named_parameters())
-    optimizer, num_opt_steps = get_optimizer(params, len(train_dl.dataset), config)
+    optimizer, lr_schedule, num_opt_steps = get_optimizer(params, len(train_dl), config)
     log("Number of train optimization steps is : %d"%(num_opt_steps), console=False)
 
     #=========================================================
@@ -103,7 +114,7 @@ def finetune(model, X1, X2, y, config):
 
         model.train()
         losses = []
-        batch_iter = tqdm(train_dl, desc="Training", leave=True)
+        batch_iter = pbar(train_dl, desc="Training  ", leave=True)
 
         for step, batch in enumerate(batch_iter):
             batch = tuple(t.to(device) for t in batch)
@@ -121,7 +132,7 @@ def finetune(model, X1, X2, y, config):
 
             # step the optimizer every grad_accum_steps
             if (step + 1) % grad_accum_steps == 0:
-                update_learning_rate(optimizer, global_step, num_opt_steps, config)
+                update_learning_rate(optimizer, global_step, lr_schedule, config)
                 optimizer.step()
                 optimizer.zero_grad()
                 global_step += 1
@@ -144,7 +155,7 @@ def finetune(model, X1, X2, y, config):
     return model
 
 
-def eval_model(model, dataloader, config, desc="Validation"):
+def eval_model(model, dataloader, config, desc="Validating"):
     """
     Evaluate model on validation data.
 
@@ -154,11 +165,11 @@ def eval_model(model, dataloader, config, desc="Validation"):
         Bert model plus mlp head
     dataloader : Dataloader
         validation dataloader
-    device : torch.device
-        device to run validation on
-    model_type : string
-         'text_classifier' | 'text_regressor' | 'token_classifier'
-
+    config : FinetuneConfig
+        Parameters for finetuning BERT
+    desc : string
+        text label for progress bar
+  
     Returns
     -------
     loss : float
@@ -179,7 +190,9 @@ def eval_model(model, dataloader, config, desc="Validation"):
     loss = accy = 0.
     total_evals = 0
     res = {}
-    batch_iter = tqdm(dataloader, desc=desc, leave=False)
+
+    sys.stdout.flush()
+    batch_iter = pbar(dataloader, desc=desc, leave=True)
 
     for eval_steps, batch in enumerate(batch_iter):
         batch = tuple(t.to(device) for t in batch)

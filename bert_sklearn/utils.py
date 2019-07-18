@@ -4,7 +4,7 @@ import random
 import numpy as np
 import torch
 
-from .model.pytorch_pretrained import BertAdam, warmup_linear
+from .model.pytorch_pretrained import BertAdam, WarmupLinearSchedule
 
 
 def set_random_seed(seed=42, use_cuda=True):
@@ -155,10 +155,8 @@ def get_optimizer(params, len_train_data, config):
     num_opt_steps : int
         number of optimization training steps
     """
-
-    num_opt_steps = len_train_data / config.train_batch_size
-    num_opt_steps = int(num_opt_steps / config.gradient_accumulation_steps) * config.epochs
-
+    lr_schedule = None
+    num_opt_steps = len_train_data // config.gradient_accumulation_steps * config.epochs
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     grouped_params = [
         {'params': [p for n, p in params if not any(nd in n for nd in no_decay)],
@@ -187,23 +185,26 @@ def get_optimizer(params, len_train_data, config):
             optimizer = FP16_Optimizer(optimizer, dynamic_loss_scale=True)
         else:
             optimizer = FP16_Optimizer(optimizer, static_loss_scale=config.loss_scale)
+
+        lr_schedule = WarmupLinearSchedule(warmup=config.warmup_proportion,
+                                           t_total=num_opt_steps)
     else:
         optimizer = BertAdam(grouped_params,
                              lr=config.learning_rate,
                              warmup=config.warmup_proportion,
                              t_total=num_opt_steps)
 
-    return optimizer, num_opt_steps
+    return optimizer, lr_schedule, num_opt_steps
 
 
-def update_learning_rate(optimizer, global_step, num_opt_steps, config):
+def update_learning_rate(optimizer, global_step, lr_schedule, config):
     """Update learning rate for optimizer for special warm up BERT uses
 
     if args.fp16 is False, BertAdam is used that handles this automatically
     """
-    lr, warmup = config.learning_rate, config.warmup_proportion
+    lr = config.learning_rate
     if config.fp16:
-        lr_this_step = lr * warmup_linear(global_step/num_opt_steps, warmup)
+        lr_this_step = lr * lr_schedule.get_lr(global_step)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr_this_step
 
