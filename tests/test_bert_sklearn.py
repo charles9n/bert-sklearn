@@ -1,7 +1,9 @@
 import os
 import sys
 import csv
+import shutil
 
+import pytest
 import numpy as np
 import pandas as pd
 from sklearn import metrics
@@ -94,7 +96,7 @@ def test_bert_sklearn_accy():
     cmd = r"python tests/run_classifier.py --task_name sst-2 \
                                 --data_dir ./tests/data/sst2 \
                                 --do_train  --do_eval \
-                                --output_dir . \
+                                --output_dir ./comptest \
                                 --bert_model bert-base-uncased \
                                 --do_lower_case \
                                 --learning_rate 5e-5 \
@@ -109,15 +111,15 @@ def test_bert_sklearn_accy():
     print("...finished run_classifier.py\n")  
 
     # parse run_classifier.py output file and find the accy
-    accy = open("eval_results.txt").read().split("\n")[0] # 'acc = 0.76'
+    accy = open("comptest/eval_results.txt").read().split("\n")[0] # 'acc = 0.76'
     accy = accy.split("=")[1]
     accy = float(accy)
-    print("bert_sklearn accy: %.02f, run_classifier.py accy : %0.02f"%(bert_sklearn_accy,accy))
+    print("bert_sklearn accy: %.02f, run_classifier.py accy : %0.02f"%(bert_sklearn_accy, accy))
 
     # clean up 
     print("\nCleaning up eval file: eval_results.txt")
-    os.remove("eval_results.txt")
-
+    #os.remove("eval_results.txt")
+    shutil.rmtree("comptest")
     assert bert_sklearn_accy == accy
 
 
@@ -151,6 +153,21 @@ def test_save_load_model():
     os.remove(savefile)
 
     assert accy1 == accy2
+
+
+def test_not_fitted_exception():
+    """Test predicting with a model that has not been fitted"""
+
+    X_train, y_train, X_dev, y_dev = sst2_test_data()
+
+    model = BertClassifier()
+    model.max_seq_length = 64
+    model.train_batch_size = 8
+    model.epochs= 1
+
+    # model has not been fitted: model.fit(X_train, y_train)    
+    with pytest.raises(Exception):
+        model.score(X_dev, y_dev)
 
 
 def test_regression():
@@ -233,9 +250,6 @@ def test_ner():
     # fit model
     model = model.fit(X, y)
 
-    # score model
-    model.score(X, y)
-
     # predict on a token list longer than 64
     n = 100
     x = [str(i) for i in range(n)]
@@ -243,6 +257,8 @@ def test_ner():
 
     # check we get a prediction even on truncated tokens
     assert len(y) == n
+    
+    
 
 
 """
