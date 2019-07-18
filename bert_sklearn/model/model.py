@@ -105,14 +105,13 @@ class BertPlusMLP(BertPreTrainedModel):
         if labels is not None:
             if self.model_type == "text_classifier":
                 loss_criterion = nn.CrossEntropyLoss(reduction='none')
-                loss = loss_criterion(output.view(-1, output.shape[-1]), labels.view(-1))                
+                loss = loss_criterion(output.view(-1, output.shape[-1]), labels.view(-1))
             elif self.model_type == "text_regressor":
                 loss_criterion = nn.MSELoss(reduction='none')
                 output = torch.squeeze(output)
                 loss = loss_criterion(output, labels)
             elif self.model_type == "token_classifier":
                 loss_criterion = nn.CrossEntropyLoss(reduction='none', ignore_index=-1)
-
                 loss = loss_criterion(output.view(-1, output.shape[-1]), labels.view(-1))
             return loss, output
         else:
