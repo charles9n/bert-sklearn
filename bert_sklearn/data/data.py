@@ -137,8 +137,8 @@ class TokenFeaturesDataset(Dataset):
 
             # convert to label ids
             labels = [self.label2id[label] for label in labels]
-            
-            # create token labels for all tokens. Set the non-start tokens to 
+
+            # create token labels for all tokens. Set the non-start tokens to
             # have label ids = "-1". We will flag them to ignored in the loss
             # function
             token_labels = [-1] * self.max_seq_length
@@ -227,7 +227,7 @@ def get_test_dl(X1, X2, y, config):
                          drop_last=config.drop_last_batch, shuffle=False)
 
     return test_dl
-    
+
 
 def get_train_val_dl(X1, X2, y, config):
     """

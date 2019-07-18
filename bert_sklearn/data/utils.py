@@ -16,7 +16,7 @@ class TokenFeatures(TextFeatures):
     Input features for the BERT model for sequence/token tasks.
     """
     def __init__(self, input_ids, input_mask, segment_ids, token_starts):
-        TextFeatures.__init__(self,input_ids, input_mask, segment_ids)
+        TextFeatures.__init__(self, input_ids, input_mask, segment_ids)
         self.token_starts = token_starts
 
 
@@ -152,7 +152,7 @@ def convert_tokens_to_features(input_tokens, max_seq_length, tokenizer):
 
     # set segment ids
     segment_ids = [0] * len(tokens)
-    
+
     feature = pad_and_get_ids(tokens, segment_ids, max_seq_length, tokenizer)
 
     return TokenFeatures(feature.input_ids, feature.input_mask,
