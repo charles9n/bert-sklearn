@@ -23,6 +23,8 @@ import unicodedata
 from io import open
 
 from .file_utils import cached_path
+from .file_utils import biobert_from_archive
+from .file_utils import scibert_from_archive
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,27 @@ PRETRAINED_VOCAB_ARCHIVE_MAP = {
     'bert-base-multilingual-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-uncased-vocab.txt",
     'bert-base-multilingual-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-cased-vocab.txt",
     'bert-base-chinese': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-chinese-vocab.txt",
+    'bert-base-german-cased': "https://int-deepset-models-bert.s3.eu-central-1.amazonaws.com/pytorch/bert-base-german-cased-vocab.txt",
+    'bert-large-uncased-whole-word-masking': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-vocab.txt",
+    'bert-large-cased-whole-word-masking': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-vocab.txt",
+    'bert-large-uncased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-finetuned-squad-vocab.txt",
+    'bert-large-cased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-finetuned-squad-vocab.txt",
+    'bert-base-cased-finetuned-mrpc': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased-finetuned-mrpc-vocab.txt",
+    # BioBERT models    
+    'biobert-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.1-pubmed/biobert_v1.1_pubmed.tar.gz",
+    'biobert-v1.1-pubmed-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.1-pubmed/biobert_v1.1_pubmed.tar.gz", 
+    'biobert-v1.0-pubmed-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.0-pubmed/biobert_v1.0_pubmed.tar.gz",        
+    'biobert-v1.0-pubmed-pmc-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.0-pubmed-pmc/biobert_v1.0_pubmed_pmc.tar.gz",    
+    'biobert-v1.0-pmc-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.0-pmc/biobert_v1.0_pmc.tar.gz",
+    # SciBERT models        
+     'scibert-scivocab-uncased': "https://s3-us-west-2.amazonaws.com/ai2-s2-research/scibert/pytorch_models/scibert_scivocab_uncased.tar",     
+    'scibert-scivocab-cased': "https://s3-us-west-2.amazonaws.com/ai2-s2-research/scibert/pytorch_models/scibert_scivocab_cased.tar",         
+    'scibert-basevocab-uncased': "https://s3-us-west-2.amazonaws.com/ai2-s2-research/scibert/pytorch_models/scibert_basevocab_uncased.tar",                   
+    'scibert-basevocab-cased': "https://s3-us-west-2.amazonaws.com/ai2-s2-research/scibert/pytorch_models/scibert_basevocab_cased.tar",
+    # BERT on Stilts models 
+    'bert-stilts-mnli-large-uncased': "https://raw.githubusercontent.com/zphang/bert_on_stilts/master/cache/bert_metadata/uncased_L-24_H-1024_A-16/vocab.txt"
 }
+
 PRETRAINED_VOCAB_POSITIONAL_EMBEDDINGS_SIZE_MAP = {
     'bert-base-uncased': 512,
     'bert-large-uncased': 512,
@@ -43,7 +65,25 @@ PRETRAINED_VOCAB_POSITIONAL_EMBEDDINGS_SIZE_MAP = {
     'bert-base-multilingual-uncased': 512,
     'bert-base-multilingual-cased': 512,
     'bert-base-chinese': 512,
+    'bert-base-german-cased': 512,
+    'bert-large-uncased-whole-word-masking': 512,
+    'bert-large-cased-whole-word-masking': 512,
+    'bert-large-uncased-whole-word-masking-finetuned-squad': 512,
+    'bert-large-cased-whole-word-masking-finetuned-squad': 512,
+    'bert-base-cased-finetuned-mrpc': 512,
+    # BioBERT
+    'biobert-base-cased': 512,
+    'biobert-v1.1-pubmed-base-cased': 512,
+    'biobert-v1.0-pubmed-base-cased': 512,
+    'biobert-v1.0-pubmed-pmc-base-cased': 512,
+    'biobert-v1.0-pmc-base-cased': 512,
+    # SciBERT
+    'scibert-scivocab-uncased': 512,
+    'scibert-scivocab-cased': 512,              
+    'scibert-basevocab-uncased': 512,
+    'scibert-basevocab-uncased': 512,    
 }
+    
 VOCAB_NAME = 'vocab.txt'
 
 
@@ -74,7 +114,7 @@ def whitespace_tokenize(text):
 class BertTokenizer(object):
     """Runs end-to-end tokenization: punctuation splitting + wordpiece"""
 
-    def __init__(self, vocab_file, do_lower_case=True, max_len=None, do_basic_tokenize=True,
+    def __init__(self, vocab_file_or_dict, do_lower_case=True, max_len=None, do_basic_tokenize=True,
                  never_split=("[UNK]", "[SEP]", "[PAD]", "[CLS]", "[MASK]")):
         """Constructs a BertTokenizer.
 
@@ -90,11 +130,18 @@ class BertTokenizer(object):
           never_split: List of tokens which will never be split during tokenization.
                          Only has an effect when do_wordpiece_only=False
         """
-        if not os.path.isfile(vocab_file):
+        
+        
+        # if we have passed in OrderedDict, then set vocab, otherwise load vocab from file
+        if isinstance(vocab_file_or_dict, collections.OrderedDict):
+            self.vocab = vocab_file_or_dict
+        elif os.path.isfile(vocab_file_or_dict):
+                self.vocab = load_vocab(vocab_file_or_dict)
+        else:
             raise ValueError(
                 "Can't find a vocabulary file at path '{}'. To load the vocabulary from a Google pretrained "
-                "model use `tokenizer = BertTokenizer.from_pretrained(PRETRAINED_MODEL_NAME)`".format(vocab_file))
-        self.vocab = load_vocab(vocab_file)
+                "model use `tokenizer = BertTokenizer.from_pretrained(PRETRAINED_MODEL_NAME)`".format(vocab_file_or_dict))        
+        
         self.ids_to_tokens = collections.OrderedDict(
             [(ids, tok) for tok, ids in self.vocab.items()])
         self.do_basic_tokenize = do_basic_tokenize
@@ -134,6 +181,21 @@ class BertTokenizer(object):
             tokens.append(self.ids_to_tokens[i])
         return tokens
 
+    def save_vocabulary(self, vocab_path):
+        """Save the tokenizer vocabulary to a directory or file."""
+        index = 0
+        if os.path.isdir(vocab_path):
+            vocab_file = os.path.join(vocab_path, VOCAB_NAME)
+        with open(vocab_file, "w", encoding="utf-8") as writer:
+            for token, token_index in sorted(self.vocab.items(), key=lambda kv: kv[1]):
+                if index != token_index:
+                    logger.warning("Saving vocabulary to {}: vocabulary indices are not consecutive."
+                                   " Please check that the vocabulary is not corrupted!".format(vocab_file))
+                    index = token_index
+                writer.write(token + u'\n')
+                index += 1
+        return vocab_file
+
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, cache_dir=None, *inputs, **kwargs):
         """
@@ -158,15 +220,35 @@ class BertTokenizer(object):
             vocab_file = os.path.join(vocab_file, VOCAB_NAME)
         # redirect to the cache, if necessary
         try:
-            resolved_vocab_file = cached_path(vocab_file, cache_dir=cache_dir)
+            model_name = pretrained_model_name_or_path
+            
+            # BioBERT archive
+            if model_name.startswith('biobert'):
+                resolved_vocab_file, _, _, tempdir = \
+                    biobert_from_archive(vocab_file, cache_dir, logger)
+                
+            # SciBERT archive    
+            elif model_name.startswith('scibert'):
+                resolved_vocab_file, _, _, tempdir = \
+                    scibert_from_archive(vocab_file, cache_dir, logger)                
+                
+            # standard model archives: 'bert-base-uncased', 'bert-large-uncased', etc... 
+            else:               
+                resolved_vocab_file = cached_path(vocab_file, cache_dir=cache_dir)          
+
         except EnvironmentError:
-            logger.error(
-                "Model name '{}' was not found in model name list ({}). "
-                "We assumed '{}' was a path or url but couldn't find any file "
-                "associated to this path or url.".format(
-                    pretrained_model_name_or_path,
-                    ', '.join(PRETRAINED_VOCAB_ARCHIVE_MAP.keys()),
-                    vocab_file))
+            if pretrained_model_name_or_path in PRETRAINED_VOCAB_ARCHIVE_MAP:
+                logger.error(
+                    "Couldn't reach server at '{}' to download vocabulary.".format(
+                        vocab_file))
+            else:
+                logger.error(
+                    "Model name '{}' was not found in model name list ({}). "
+                    "We assumed '{}' was a path or url but couldn't find any file "
+                    "associated to this path or url.".format(
+                        pretrained_model_name_or_path,
+                        ', '.join(PRETRAINED_VOCAB_ARCHIVE_MAP.keys()),
+                        vocab_file))
             return None
         if resolved_vocab_file == vocab_file:
             logger.info("loading vocabulary file {}".format(vocab_file))
@@ -180,6 +262,10 @@ class BertTokenizer(object):
             kwargs['max_len'] = min(kwargs.get('max_len', int(1e12)), max_len)
         # Instantiate tokenizer.
         tokenizer = cls(resolved_vocab_file, *inputs, **kwargs)
+        # clean up tempdir if we extracted vocab.txt from archive
+        #if tempdir is not None:
+        #    logger.info("Removing tempdir {} ".format(tempdir))
+        #    shutil.rmtree(tempdir)          
         return tokenizer
 
 

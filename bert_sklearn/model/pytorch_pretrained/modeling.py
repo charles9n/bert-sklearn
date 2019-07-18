@@ -22,32 +22,90 @@ import json
 import logging
 import math
 import os
-import shutil
-import tarfile
-import tempfile
 import sys
+import shutil
 from io import open
 
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
 
-from .file_utils import cached_path
+from .file_utils import cached_path, WEIGHTS_NAME, CONFIG_NAME
+from .file_utils import biobert_from_archive
+from .file_utils import scibert_from_archive
 
 logger = logging.getLogger(__name__)
 
 PRETRAINED_MODEL_ARCHIVE_MAP = {
-    'bert-base-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased.tar.gz",
-    'bert-large-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased.tar.gz",
-    'bert-base-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased.tar.gz",
-    'bert-large-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased.tar.gz",
-    'bert-base-multilingual-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-uncased.tar.gz",
-    'bert-base-multilingual-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-cased.tar.gz",
-    'bert-base-chinese': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-chinese.tar.gz",
+    'bert-base-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-pytorch_model.bin",
+    'bert-large-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-pytorch_model.bin",
+    'bert-base-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased-pytorch_model.bin",
+    'bert-large-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-pytorch_model.bin",
+    'bert-base-multilingual-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-uncased-pytorch_model.bin",
+    'bert-base-multilingual-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-cased-pytorch_model.bin",
+    'bert-base-chinese': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-chinese-pytorch_model.bin",
+    'bert-base-german-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-german-cased-pytorch_model.bin",
+    'bert-large-uncased-whole-word-masking': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-pytorch_model.bin",
+    'bert-large-cased-whole-word-masking': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-pytorch_model.bin",
+    'bert-large-uncased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-finetuned-squad-pytorch_model.bin",
+    'bert-large-cased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-finetuned-squad-pytorch_model.bin",
+    'bert-base-cased-finetuned-mrpc': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased-finetuned-mrpc-pytorch_model.bin",    
+    # BioBERT models
+    'biobert-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.1-pubmed/biobert_v1.1_pubmed.tar.gz",
+    'biobert-v1.1-pubmed-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.1-pubmed/biobert_v1.1_pubmed.tar.gz",
+    'biobert-v1.0-pubmed-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.0-pubmed/biobert_v1.0_pubmed.tar.gz",
+    'biobert-v1.0-pubmed-pmc-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.0-pubmed-pmc/biobert_v1.0_pubmed_pmc.tar.gz",
+    'biobert-v1.0-pmc-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.0-pmc/biobert_v1.0_pmc.tar.gz",
+    # SciBERT models        
+    'scibert-scivocab-uncased': "https://s3-us-west-2.amazonaws.com/ai2-s2-research/scibert/pytorch_models/scibert_scivocab_uncased.tar",
+    'scibert-scivocab-cased': "https://s3-us-west-2.amazonaws.com/ai2-s2-research/scibert/pytorch_models/scibert_scivocab_cased.tar",
+    'scibert-basevocab-uncased': "https://s3-us-west-2.amazonaws.com/ai2-s2-research/scibert/pytorch_models/scibert_basevocab_uncased.tar",
+    'scibert-basevocab-cased': "https://s3-us-west-2.amazonaws.com/ai2-s2-research/scibert/pytorch_models/scibert_basevocab_cased.tar",
 }
-CONFIG_NAME = 'bert_config.json'
-WEIGHTS_NAME = 'pytorch_model.bin'
+
+
+PRETRAINED_CONFIG_ARCHIVE_MAP = {
+    'bert-base-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-uncased-config.json",
+    'bert-large-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-config.json",
+    'bert-base-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased-config.json",
+    'bert-large-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-config.json",
+    'bert-base-multilingual-uncased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-uncased-config.json",
+    'bert-base-multilingual-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-multilingual-cased-config.json",
+    'bert-base-chinese': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-chinese-config.json",
+    'bert-base-german-cased': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-german-cased-config.json",
+    'bert-large-uncased-whole-word-masking': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-config.json",
+    'bert-large-cased-whole-word-masking': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-config.json",
+    'bert-large-uncased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-finetuned-squad-config.json",
+    'bert-large-cased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-finetuned-squad-config.json",
+    'bert-base-cased-finetuned-mrpc': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased-finetuned-mrpc-config.json",
+}
+BERT_CONFIG_NAME = 'bert_config.json'
 TF_WEIGHTS_NAME = 'model.ckpt'
+
+def prune_linear_layer(layer, index, dim=0):
+    """ Prune a linear layer (a model parameters) to keep only entries in index.
+        Return the pruned layer as a new layer with requires_grad=True.
+        Used to remove heads.
+    """
+    index = index.to(layer.weight.device)
+    W = layer.weight.index_select(dim, index).clone().detach()
+    if layer.bias is not None:
+        if dim == 1:
+            b = layer.bias.clone().detach()
+        else:
+            b = layer.bias[index].clone().detach()
+    new_size = list(layer.weight.size())
+    new_size[dim] = len(index)
+    new_layer = nn.Linear(new_size[1], new_size[0], bias=layer.bias is not None).to(layer.weight.device)
+    new_layer.weight.requires_grad = False
+    new_layer.weight.copy_(W.contiguous())
+    new_layer.weight.requires_grad = True
+    if layer.bias is not None:
+        new_layer.bias.requires_grad = False
+        new_layer.bias.copy_(b.contiguous())
+        new_layer.bias.requires_grad = True
+    return new_layer
+
 
 def load_tf_weights_in_bert(model, tf_checkpoint_path):
     """ Load tf checkpoints in a pytorch model
@@ -61,13 +119,14 @@ def load_tf_weights_in_bert(model, tf_checkpoint_path):
             "https://www.tensorflow.org/install/ for installation instructions.")
         raise
     tf_path = os.path.abspath(tf_checkpoint_path)
-    print("Converting TensorFlow checkpoint from {}".format(tf_path))
+    #print("Converting TensorFlow checkpoint from {}".format(tf_path))
+    logger.info("Loading tf ckpt from  {}".format(tf_path))    
     # Load weights from TF model
     init_vars = tf.train.list_variables(tf_path)
     names = []
     arrays = []
     for name, shape in init_vars:
-        print("Loading TF weight {} with shape {}".format(name, shape))
+        #print("Loading TF weight {} with shape {}".format(name, shape))
         array = tf.train.load_variable(tf_path, name)
         names.append(name)
         arrays.append(array)
@@ -77,7 +136,7 @@ def load_tf_weights_in_bert(model, tf_checkpoint_path):
         # adam_v and adam_m are variables used in AdamWeightDecayOptimizer to calculated m and v
         # which are not required for using pretrained model
         if any(n in ["adam_v", "adam_m", "global_step"] for n in name):
-            print("Skipping {}".format("/".join(name)))
+            #print("Skipping {}".format("/".join(name)))
             continue
         pointer = model
         for m_name in name:
@@ -111,7 +170,7 @@ def load_tf_weights_in_bert(model, tf_checkpoint_path):
         except AssertionError as e:
             e.args += (pointer.shape, array.shape)
             raise
-        print("Initialize PyTorch weight {}".format(name))
+        #print("Initialize PyTorch weight {}".format(name))
         pointer.data = torch.from_numpy(array)
     return model
 
@@ -146,7 +205,8 @@ class BertConfig(object):
                  attention_probs_dropout_prob=0.1,
                  max_position_embeddings=512,
                  type_vocab_size=2,
-                 initializer_range=0.02):
+                 initializer_range=0.02,
+                 layer_norm_eps=1e-12):
         """Constructs BertConfig.
 
         Args:
@@ -170,6 +230,7 @@ class BertConfig(object):
                 `BertModel`.
             initializer_range: The sttdev of the truncated_normal_initializer for
                 initializing all weight matrices.
+            layer_norm_eps: The epsilon used by LayerNorm.
         """
         if isinstance(vocab_size_or_config_json_file, str) or (sys.version_info[0] == 2
                         and isinstance(vocab_size_or_config_json_file, unicode)):
@@ -189,6 +250,7 @@ class BertConfig(object):
             self.max_position_embeddings = max_position_embeddings
             self.type_vocab_size = type_vocab_size
             self.initializer_range = initializer_range
+            self.layer_norm_eps = layer_norm_eps
         else:
             raise ValueError("First argument must be either a vocabulary size (int)"
                              "or the path to a pretrained model config file (str)")
@@ -220,6 +282,11 @@ class BertConfig(object):
         """Serializes this instance to a JSON string."""
         return json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n"
 
+    def to_json_file(self, json_file_path):
+        """ Save this instance to a json file."""
+        with open(json_file_path, "w", encoding='utf-8') as writer:
+            writer.write(self.to_json_string())
+
 try:
     from apex.normalization.fused_layer_norm import FusedLayerNorm as BertLayerNorm
 except ImportError:
@@ -250,7 +317,7 @@ class BertEmbeddings(nn.Module):
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
+        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, input_ids, token_type_ids=None):
@@ -271,12 +338,16 @@ class BertEmbeddings(nn.Module):
 
 
 class BertSelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertSelfAttention, self).__init__()
         if config.hidden_size % config.num_attention_heads != 0:
             raise ValueError(
                 "The hidden size (%d) is not a multiple of the number of attention "
                 "heads (%d)" % (config.hidden_size, config.num_attention_heads))
+        self.output_attentions = output_attentions
+        self.keep_multihead_output = keep_multihead_output
+        self.multihead_output = None
+
         self.num_attention_heads = config.num_attention_heads
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
@@ -292,7 +363,7 @@ class BertSelfAttention(nn.Module):
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def forward(self, hidden_states, attention_mask):
+    def forward(self, hidden_states, attention_mask, head_mask=None):
         mixed_query_layer = self.query(hidden_states)
         mixed_key_layer = self.key(hidden_states)
         mixed_value_layer = self.value(hidden_states)
@@ -314,10 +385,20 @@ class BertSelfAttention(nn.Module):
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
 
+        # Mask heads if we want to
+        if head_mask is not None:
+            attention_probs = attention_probs * head_mask
+
         context_layer = torch.matmul(attention_probs, value_layer)
+        if self.keep_multihead_output:
+            self.multihead_output = context_layer
+            self.multihead_output.retain_grad()
+
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
+        if self.output_attentions:
+            return attention_probs, context_layer
         return context_layer
 
 
@@ -325,7 +406,7 @@ class BertSelfOutput(nn.Module):
     def __init__(self, config):
         super(BertSelfOutput, self).__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
+        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -336,14 +417,37 @@ class BertSelfOutput(nn.Module):
 
 
 class BertAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertAttention, self).__init__()
-        self.self = BertSelfAttention(config)
+        self.output_attentions = output_attentions
+        self.self = BertSelfAttention(config, output_attentions=output_attentions,
+                                              keep_multihead_output=keep_multihead_output)
         self.output = BertSelfOutput(config)
 
-    def forward(self, input_tensor, attention_mask):
-        self_output = self.self(input_tensor, attention_mask)
+    def prune_heads(self, heads):
+        if len(heads) == 0:
+            return
+        mask = torch.ones(self.self.num_attention_heads, self.self.attention_head_size)
+        for head in heads:
+            mask[head] = 0
+        mask = mask.view(-1).contiguous().eq(1)
+        index = torch.arange(len(mask))[mask].long()
+        # Prune linear layers
+        self.self.query = prune_linear_layer(self.self.query, index)
+        self.self.key = prune_linear_layer(self.self.key, index)
+        self.self.value = prune_linear_layer(self.self.value, index)
+        self.output.dense = prune_linear_layer(self.output.dense, index, dim=1)
+        # Update hyper params
+        self.self.num_attention_heads = self.self.num_attention_heads - len(heads)
+        self.self.all_head_size = self.self.attention_head_size * self.self.num_attention_heads
+
+    def forward(self, input_tensor, attention_mask, head_mask=None):
+        self_output = self.self(input_tensor, attention_mask, head_mask)
+        if self.output_attentions:
+            attentions, self_output = self_output
         attention_output = self.output(self_output, input_tensor)
+        if self.output_attentions:
+            return attentions, attention_output
         return attention_output
 
 
@@ -366,7 +470,7 @@ class BertOutput(nn.Module):
     def __init__(self, config):
         super(BertOutput, self).__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
+        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states, input_tensor):
@@ -377,33 +481,47 @@ class BertOutput(nn.Module):
 
 
 class BertLayer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertLayer, self).__init__()
-        self.attention = BertAttention(config)
+        self.output_attentions = output_attentions
+        self.attention = BertAttention(config, output_attentions=output_attentions,
+                                               keep_multihead_output=keep_multihead_output)
         self.intermediate = BertIntermediate(config)
         self.output = BertOutput(config)
 
-    def forward(self, hidden_states, attention_mask):
-        attention_output = self.attention(hidden_states, attention_mask)
+    def forward(self, hidden_states, attention_mask, head_mask=None):
+        attention_output = self.attention(hidden_states, attention_mask, head_mask)
+        if self.output_attentions:
+            attentions, attention_output = attention_output
         intermediate_output = self.intermediate(attention_output)
         layer_output = self.output(intermediate_output, attention_output)
+        if self.output_attentions:
+            return attentions, layer_output
         return layer_output
 
 
 class BertEncoder(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertEncoder, self).__init__()
-        layer = BertLayer(config)
+        self.output_attentions = output_attentions
+        layer = BertLayer(config, output_attentions=output_attentions,
+                                  keep_multihead_output=keep_multihead_output)
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(config.num_hidden_layers)])
 
-    def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True):
+    def forward(self, hidden_states, attention_mask, output_all_encoded_layers=True, head_mask=None):
         all_encoder_layers = []
-        for layer_module in self.layer:
-            hidden_states = layer_module(hidden_states, attention_mask)
+        all_attentions = []
+        for i, layer_module in enumerate(self.layer):
+            hidden_states = layer_module(hidden_states, attention_mask, head_mask[i])
+            if self.output_attentions:
+                attentions, hidden_states = hidden_states
+                all_attentions.append(attentions)
             if output_all_encoded_layers:
                 all_encoder_layers.append(hidden_states)
         if not output_all_encoded_layers:
             all_encoder_layers.append(hidden_states)
+        if self.output_attentions:
+            return all_attentions, all_encoder_layers
         return all_encoder_layers
 
 
@@ -430,7 +548,7 @@ class BertPredictionHeadTransform(nn.Module):
             self.transform_act_fn = ACT2FN[config.hidden_act]
         else:
             self.transform_act_fn = config.hidden_act
-        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
+        self.LayerNorm = BertLayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
     def forward(self, hidden_states):
         hidden_states = self.dense(hidden_states)
@@ -519,8 +637,7 @@ class BertPreTrainedModel(nn.Module):
             module.bias.data.zero_()
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, state_dict=None, cache_dir=None,
-                        from_tf=False, *inputs, **kwargs):
+    def from_pretrained(cls, pretrained_model_name_or_path, *inputs, **kwargs):
         """
         Instantiate a BertPreTrainedModel from a pre-trained model file or a pytorch state dict.
         Download and cache the pre-trained model file if needed.
@@ -535,6 +652,9 @@ class BertPreTrainedModel(nn.Module):
                     . `bert-base-multilingual-uncased`
                     . `bert-base-multilingual-cased`
                     . `bert-base-chinese`
+                    . `bert-base-german-cased`
+                    . `bert-large-uncased-whole-word-masking`
+                    . `bert-large-cased-whole-word-masking`
                 - a path or url to a pretrained model archive containing:
                     . `bert_config.json` a configuration file for the model
                     . `pytorch_model.bin` a PyTorch dump of a BertForPreTraining instance
@@ -547,54 +667,110 @@ class BertPreTrainedModel(nn.Module):
             *inputs, **kwargs: additional input for the specific Bert class
                 (ex: num_labels for BertForSequenceClassification)
         """
+        state_dict = kwargs.get('state_dict', None)
+        kwargs.pop('state_dict', None)
+        cache_dir = kwargs.get('cache_dir', None)
+        kwargs.pop('cache_dir', None)
+        from_tf = kwargs.get('from_tf', False)
+        kwargs.pop('from_tf', None)
+
+        tempdir = weights_path = config_path = None
+        
         if pretrained_model_name_or_path in PRETRAINED_MODEL_ARCHIVE_MAP:
-            archive_file = PRETRAINED_MODEL_ARCHIVE_MAP[pretrained_model_name_or_path]
+            model_name = pretrained_model_name_or_path
+            archive_file = PRETRAINED_MODEL_ARCHIVE_MAP[model_name]
+            
+            # extract BioBERT model archive
+            if model_name.startswith('biobert'):
+                from_tf = True
+                _, config_path, weights_path, tempdir = biobert_from_archive(archive_file, cache_dir, logger)
+                         
+            # extract SciBERT model archive
+            elif model_name.startswith('scibert'):
+                _, config_path, weights_path, tempdir = scibert_from_archive(archive_file, cache_dir, logger)
+
+            # huggingface s3 model archives: i.e 'bert-base-uncased', etc.
+            else:
+                config_file = PRETRAINED_CONFIG_ARCHIVE_MAP[model_name]
+
+                config_path, weights_path = bert_from_archive(config_file, archive_file, cache_dir)
         else:
-            archive_file = pretrained_model_name_or_path
-        # redirect to the cache, if necessary
-        try:
-            resolved_archive_file = cached_path(archive_file, cache_dir=cache_dir)
-        except EnvironmentError:
-            logger.error(
-                "Model name '{}' was not found in model name list ({}). "
-                "We assumed '{}' was a path or url but couldn't find any file "
-                "associated to this path or url.".format(
-                    pretrained_model_name_or_path,
-                    ', '.join(PRETRAINED_MODEL_ARCHIVE_MAP.keys()),
-                    archive_file))
-            return None
-        if resolved_archive_file == archive_file:
-            logger.info("loading archive file {}".format(archive_file))
-        else:
-            logger.info("loading archive file {} from cache at {}".format(
-                archive_file, resolved_archive_file))
-        tempdir = None
-        if os.path.isdir(resolved_archive_file) or from_tf:
-            serialization_dir = resolved_archive_file
-        else:
-            # Extract archive to temp dir
-            tempdir = tempfile.mkdtemp()
-            logger.info("extracting archive file {} to temp dir {}".format(
-                resolved_archive_file, tempdir))
-            with tarfile.open(resolved_archive_file, 'r:gz') as archive:
-                archive.extractall(tempdir)
-            serialization_dir = tempdir
-        # Load config
-        config_file = os.path.join(serialization_dir, CONFIG_NAME)
-        config = BertConfig.from_json_file(config_file)
+            if from_tf:
+                # Directly load from a TensorFlow checkpoint
+                weights_path = os.path.join(pretrained_model_name_or_path, TF_WEIGHTS_NAME)
+                config_path = os.path.join(pretrained_model_name_or_path, BERT_CONFIG_NAME)
+            else:
+                weights_path = os.path.join(pretrained_model_name_or_path, WEIGHTS_NAME)
+                config_path = os.path.join(pretrained_model_name_or_path, CONFIG_NAME)
+
+
+        return cls.from_model_ckpt(config_path, weights_path, state_dict,
+                                   from_tf=from_tf, tempdir=tempdir, *inputs, **kwargs)
+
+    @classmethod
+    def from_model_ckpt(cls, config_file_or_dict, weights_path, state_dict=None,
+                        from_tf=False, tempdir=None, *inputs, **kwargs):
+        """
+        Instantiate a BertPreTrainedModel from a pre-trained model file or a pytorch state dict.
+
+
+        Params:
+            bert_config: either:
+                - a str with the pathname of a json file containg bert model config
+                - a dict containg the contents of a bert model config:
+                    . `bert_config.json` a configuration file for the model
+                    . `pytorch_model.bin` a PyTorch dump of a BertForPreTraining instance
+            weights_path:
+                - a str with the pathname of a file containing the model weights of either
+                - a path a pretrained model archive containing:
+                    . a pytorch model checkpoint
+                    . a TensorFlow checkpoint
+            state_dict: dict
+                an optional state dictionnary (collections.OrderedDict object) to use instead of Google pre-trained models
+            from_tf: should we load the weights from a locally saved TensorFlow checkpoint
+            tempdir: an optional str with the path to a temp dir containing any
+                     temporary model files that need to be cleaned up.
+            *inputs, **kwargs: additional input for the specific Bert class
+                (ex: num_labels for BertForSequenceClassification)
+        """
+        if isinstance(config_file_or_dict, str):
+            config = BertConfig.from_json_file(config_file_or_dict)
+        elif isinstance(config_file_or_dict, dict):
+            config = BertConfig.from_dict(config_file_or_dict)
+
         logger.info("Model config {}".format(config))
+                      
+        # Load config
+        #config = BertConfig.from_json_file(config_path)
+        #logger.info("Model config {}".format(config))
+        
         # Instantiate model.
         model = cls(config, *inputs, **kwargs)
+        
+        # If this is a Pytorch checkpoint, load model into state_dict if it has not been passed in        
         if state_dict is None and not from_tf:
-            weights_path = os.path.join(serialization_dir, WEIGHTS_NAME)
+            #print("Loading Pytorch checkpoint from ", weights_path.split("/")[-1])
+            print("Loading Pytorch checkpoint")                            
+            #state_dict = torch.load(resolved_archive_file, map_location='cpu')
             state_dict = torch.load(weights_path, map_location='cpu' if not torch.cuda.is_available() else None)
-        if tempdir:
-            # Clean up temp dir
-            shutil.rmtree(tempdir)
+            if tempdir:
+                # Clean up temp dir
+                shutil.rmtree(tempdir)    
+                        
+        # If this is a TensorFlow checkpoint, load and return model
         if from_tf:
+            model = load_tf_weights_in_bert(model, weights_path)
+            print("Loading Tensorflow checkpoint from ", weights_path.split("/")[-1])
+            if tempdir:
+                # Clean up temp dir if we extracted SciBERT or BioBERT archive
+                shutil.rmtree(tempdir)
+            return model            
+            
+        #if from_tf:
             # Directly load from a TensorFlow checkpoint
-            weights_path = os.path.join(serialization_dir, TF_WEIGHTS_NAME)
-            return load_tf_weights_in_bert(model, weights_path)
+            #return load_tf_weights_in_bert(model, weights_path)
+            
+            
         # Load from a PyTorch state_dict
         old_keys = []
         new_keys = []
@@ -642,11 +818,62 @@ class BertPreTrainedModel(nn.Module):
         return model
 
 
+def bert_from_archive(config_file, archive_file, cache_dir):
+    """Download and resolve from cache huggingface S3 archives of BERT models.        
+    """
+    # redirect to the cache, if necessary
+    try:
+        resolved_archive_file = cached_path(archive_file, cache_dir=cache_dir)
+    except EnvironmentError:
+        if pretrained_model_name_or_path in PRETRAINED_MODEL_ARCHIVE_MAP:
+            logger.error(
+                "Couldn't reach server at '{}' to download pretrained weights.".format(
+                    archive_file))
+        else:
+            logger.error(
+                "Model name '{}' was not found in model name list ({}). "
+                "We assumed '{}' was a path or url but couldn't find any file "
+                "associated to this path or url.".format(
+                    pretrained_model_name_or_path,
+                    ', '.join(PRETRAINED_MODEL_ARCHIVE_MAP.keys()),
+                    archive_file))
+        return None
+    try:
+        resolved_config_file = cached_path(config_file, cache_dir=cache_dir)
+    except EnvironmentError:
+        if pretrained_model_name_or_path in PRETRAINED_CONFIG_ARCHIVE_MAP:
+            logger.error(
+                "Couldn't reach server at '{}' to download pretrained model configuration file.".format(
+                    config_file))
+        else:
+            logger.error(
+                "Model name '{}' was not found in model name list ({}). "
+                "We assumed '{}' was a path or url but couldn't find any file "
+                "associated to this path or url.".format(
+                    pretrained_model_name_or_path,
+                    ', '.join(PRETRAINED_CONFIG_ARCHIVE_MAP.keys()),
+                    config_file))
+        return None
+    if resolved_archive_file == archive_file and resolved_config_file == config_file:
+        logger.info("loading weights file {}".format(archive_file))
+        logger.info("loading configuration file {}".format(config_file))
+    else:
+        logger.info("loading weights file {} from cache at {}".format(
+            archive_file, resolved_archive_file))
+        logger.info("loading configuration file {} from cache at {}".format(
+            config_file, resolved_config_file))
+            
+    return resolved_config_file, resolved_archive_file
+
+
 class BertModel(BertPreTrainedModel):
     """BERT model ("Bidirectional Embedding Representations from a Transformer").
 
     Params:
-        config: a BertConfig class instance with the configuration to build a new model
+        `config`: a BertConfig class instance with the configuration to build a new model
+        `output_attentions`: If True, also output attentions weights computed by the model at each layer. Default: False
+        `keep_multihead_output`: If True, saves output of the multi-head attention module with its gradient.
+            This can be used to compute head importance metrics. Default: False
 
     Inputs:
         `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
@@ -660,6 +887,9 @@ class BertModel(BertPreTrainedModel):
             input sequence length in the current batch. It's the mask that we typically use for attention when
             a batch has varying length sentences.
         `output_all_encoded_layers`: boolean which controls the content of the `encoded_layers` output as described below. Default: `True`.
+        `head_mask`: an optional torch.Tensor of shape [num_heads] or [num_layers, num_heads] with indices between 0 and 1.
+            It's a mask to be used to nullify some heads of the transformer. 1.0 => head is fully masked, 0.0 => head is not masked.
+
 
     Outputs: Tuple of (encoded_layers, pooled_output)
         `encoded_layers`: controled by `output_all_encoded_layers` argument:
@@ -686,14 +916,29 @@ class BertModel(BertPreTrainedModel):
     all_encoder_layers, pooled_output = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertModel, self).__init__(config)
+        self.output_attentions = output_attentions
         self.embeddings = BertEmbeddings(config)
-        self.encoder = BertEncoder(config)
+        self.encoder = BertEncoder(config, output_attentions=output_attentions,
+                                           keep_multihead_output=keep_multihead_output)
         self.pooler = BertPooler(config)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, output_all_encoded_layers=True):
+    def prune_heads(self, heads_to_prune):
+        """ Prunes heads of the model.
+            heads_to_prune: dict of {layer_num: list of heads to prune in this layer}
+        """
+        for layer, heads in heads_to_prune.items():
+            self.encoder.layer[layer].attention.prune_heads(heads)
+
+    def get_multihead_outputs(self):
+        """ Gather all multi-head outputs.
+            Return: list (layers) of multihead module outputs with gradients
+        """
+        return [layer.attention.self.multihead_output for layer in self.encoder.layer]
+
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, output_all_encoded_layers=True, head_mask=None):
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids)
         if token_type_ids is None:
@@ -714,14 +959,34 @@ class BertModel(BertPreTrainedModel):
         extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype) # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
+        # Prepare head mask if needed
+        # 1.0 in head_mask indicate we keep the head
+        # attention_probs has shape bsz x n_heads x N x N
+        # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
+        # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
+        if head_mask is not None:
+            if head_mask.dim() == 1:
+                head_mask = head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+                head_mask = head_mask.expand_as(self.config.num_hidden_layers, -1, -1, -1, -1)
+            elif head_mask.dim() == 2:
+                head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)  # We can specify head_mask for each layer
+            head_mask = head_mask.to(dtype=next(self.parameters()).dtype) # switch to fload if need + fp16 compatibility
+        else:
+            head_mask = [None] * self.config.num_hidden_layers
+
         embedding_output = self.embeddings(input_ids, token_type_ids)
         encoded_layers = self.encoder(embedding_output,
                                       extended_attention_mask,
-                                      output_all_encoded_layers=output_all_encoded_layers)
+                                      output_all_encoded_layers=output_all_encoded_layers,
+                                      head_mask=head_mask)
+        if self.output_attentions:
+            all_attentions, encoded_layers = encoded_layers
         sequence_output = encoded_layers[-1]
         pooled_output = self.pooler(sequence_output)
         if not output_all_encoded_layers:
             encoded_layers = encoded_layers[-1]
+        if self.output_attentions:
+            return all_attentions, encoded_layers, pooled_output
         return encoded_layers, pooled_output
 
 
@@ -732,7 +997,10 @@ class BertForPreTraining(BertPreTrainedModel):
         - the next sentence classification head.
 
     Params:
-        config: a BertConfig class instance with the configuration to build a new model.
+        `config`: a BertConfig class instance with the configuration to build a new model
+        `output_attentions`: If True, also output attentions weights computed by the model at each layer. Default: False
+        `keep_multihead_output`: If True, saves output of the multi-head attention module with its gradient.
+            This can be used to compute head importance metrics. Default: False
 
     Inputs:
         `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
@@ -751,6 +1019,8 @@ class BertForPreTraining(BertPreTrainedModel):
         `next_sentence_label`: optional next sentence classification loss: torch.LongTensor of shape [batch_size]
             with indices selected in [0, 1].
             0 => next sentence is the continuation, 1 => next sentence is a random sentence.
+        `head_mask`: an optional torch.Tensor of shape [num_heads] or [num_layers, num_heads] with indices between 0 and 1.
+            It's a mask to be used to nullify some heads of the transformer. 1.0 => head is fully masked, 0.0 => head is not masked.
 
     Outputs:
         if `masked_lm_labels` and `next_sentence_label` are not `None`:
@@ -775,15 +1045,21 @@ class BertForPreTraining(BertPreTrainedModel):
     masked_lm_logits_scores, seq_relationship_logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertForPreTraining, self).__init__(config)
-        self.bert = BertModel(config)
+        self.output_attentions = output_attentions
+        self.bert = BertModel(config, output_attentions=output_attentions,
+                                      keep_multihead_output=keep_multihead_output)
         self.cls = BertPreTrainingHeads(config, self.bert.embeddings.word_embeddings.weight)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None, next_sentence_label=None):
-        sequence_output, pooled_output = self.bert(input_ids, token_type_ids, attention_mask,
-                                                   output_all_encoded_layers=False)
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None, next_sentence_label=None, head_mask=None):
+        outputs = self.bert(input_ids, token_type_ids, attention_mask,
+                                                   output_all_encoded_layers=False, head_mask=head_mask)
+        if self.output_attentions:
+            all_attentions, sequence_output, pooled_output = outputs
+        else:
+            sequence_output, pooled_output = outputs
         prediction_scores, seq_relationship_score = self.cls(sequence_output, pooled_output)
 
         if masked_lm_labels is not None and next_sentence_label is not None:
@@ -792,8 +1068,9 @@ class BertForPreTraining(BertPreTrainedModel):
             next_sentence_loss = loss_fct(seq_relationship_score.view(-1, 2), next_sentence_label.view(-1))
             total_loss = masked_lm_loss + next_sentence_loss
             return total_loss
-        else:
-            return prediction_scores, seq_relationship_score
+        elif self.output_attentions:
+            return all_attentions, prediction_scores, seq_relationship_score
+        return prediction_scores, seq_relationship_score
 
 
 class BertForMaskedLM(BertPreTrainedModel):
@@ -801,7 +1078,10 @@ class BertForMaskedLM(BertPreTrainedModel):
     This module comprises the BERT model followed by the masked language modeling head.
 
     Params:
-        config: a BertConfig class instance with the configuration to build a new model.
+        `config`: a BertConfig class instance with the configuration to build a new model
+        `output_attentions`: If True, also output attentions weights computed by the model at each layer. Default: False
+        `keep_multihead_output`: If True, saves output of the multi-head attention module with its gradient.
+            This can be used to compute head importance metrics. Default: False
 
     Inputs:
         `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
@@ -817,6 +1097,12 @@ class BertForMaskedLM(BertPreTrainedModel):
         `masked_lm_labels`: masked language modeling labels: torch.LongTensor of shape [batch_size, sequence_length]
             with indices selected in [-1, 0, ..., vocab_size]. All labels set to -1 are ignored (masked), the loss
             is only computed for the labels set in [0, ..., vocab_size]
+        `head_mask`: an optional torch.LongTensor of shape [num_heads] with indices
+            selected in [0, 1]. It's a mask to be used if the input sequence length is smaller than the max
+            input sequence length in the current batch. It's the mask that we typically use for attention when
+            a batch has varying length sentences.
+        `head_mask`: an optional torch.Tensor of shape [num_heads] or [num_layers, num_heads] with indices between 0 and 1.
+            It's a mask to be used to nullify some heads of the transformer. 1.0 => head is fully masked, 0.0 => head is not masked.
 
     Outputs:
         if `masked_lm_labels` is  not `None`:
@@ -838,23 +1124,31 @@ class BertForMaskedLM(BertPreTrainedModel):
     masked_lm_logits_scores = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertForMaskedLM, self).__init__(config)
-        self.bert = BertModel(config)
+        self.output_attentions = output_attentions
+        self.bert = BertModel(config, output_attentions=output_attentions,
+                                      keep_multihead_output=keep_multihead_output)
         self.cls = BertOnlyMLMHead(config, self.bert.embeddings.word_embeddings.weight)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None):
-        sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask,
-                                       output_all_encoded_layers=False)
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, masked_lm_labels=None, head_mask=None):
+        outputs = self.bert(input_ids, token_type_ids, attention_mask,
+                                       output_all_encoded_layers=False,
+                                       head_mask=head_mask)
+        if self.output_attentions:
+            all_attentions, sequence_output, _ = outputs
+        else:
+            sequence_output, _ = outputs
         prediction_scores = self.cls(sequence_output)
 
         if masked_lm_labels is not None:
             loss_fct = CrossEntropyLoss(ignore_index=-1)
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), masked_lm_labels.view(-1))
             return masked_lm_loss
-        else:
-            return prediction_scores
+        elif self.output_attentions:
+            return all_attentions, prediction_scores
+        return prediction_scores
 
 
 class BertForNextSentencePrediction(BertPreTrainedModel):
@@ -862,7 +1156,10 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
     This module comprises the BERT model followed by the next sentence classification head.
 
     Params:
-        config: a BertConfig class instance with the configuration to build a new model.
+        `config`: a BertConfig class instance with the configuration to build a new model
+        `output_attentions`: If True, also output attentions weights computed by the model at each layer. Default: False
+        `keep_multihead_output`: If True, saves output of the multi-head attention module with its gradient.
+            This can be used to compute head importance metrics. Default: False
 
     Inputs:
         `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
@@ -878,6 +1175,8 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
         `next_sentence_label`: next sentence classification loss: torch.LongTensor of shape [batch_size]
             with indices selected in [0, 1].
             0 => next sentence is the continuation, 1 => next sentence is a random sentence.
+        `head_mask`: an optional torch.Tensor of shape [num_heads] or [num_layers, num_heads] with indices between 0 and 1.
+            It's a mask to be used to nullify some heads of the transformer. 1.0 => head is fully masked, 0.0 => head is not masked.
 
     Outputs:
         if `next_sentence_label` is not `None`:
@@ -900,23 +1199,31 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
     seq_relationship_logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertForNextSentencePrediction, self).__init__(config)
-        self.bert = BertModel(config)
+        self.output_attentions = output_attentions
+        self.bert = BertModel(config, output_attentions=output_attentions,
+                                      keep_multihead_output=keep_multihead_output)
         self.cls = BertOnlyNSPHead(config)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, next_sentence_label=None):
-        _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask,
-                                     output_all_encoded_layers=False)
-        seq_relationship_score = self.cls( pooled_output)
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, next_sentence_label=None, head_mask=None):
+        outputs = self.bert(input_ids, token_type_ids, attention_mask,
+                                     output_all_encoded_layers=False,
+                                     head_mask=head_mask)
+        if self.output_attentions:
+            all_attentions, _, pooled_output = outputs
+        else:
+            _, pooled_output = outputs
+        seq_relationship_score = self.cls(pooled_output)
 
         if next_sentence_label is not None:
             loss_fct = CrossEntropyLoss(ignore_index=-1)
             next_sentence_loss = loss_fct(seq_relationship_score.view(-1, 2), next_sentence_label.view(-1))
             return next_sentence_loss
-        else:
-            return seq_relationship_score
+        elif self.output_attentions:
+            return all_attentions, seq_relationship_score
+        return seq_relationship_score
 
 
 class BertForSequenceClassification(BertPreTrainedModel):
@@ -925,12 +1232,15 @@ class BertForSequenceClassification(BertPreTrainedModel):
     the pooled output.
 
     Params:
-        `config`: a BertConfig class instance with the configuration to build a new model.
+        `config`: a BertConfig class instance with the configuration to build a new model
+        `output_attentions`: If True, also output attentions weights computed by the model at each layer. Default: False
+        `keep_multihead_output`: If True, saves output of the multi-head attention module with its gradient.
+            This can be used to compute head importance metrics. Default: False
         `num_labels`: the number of classes for the classifier. Default = 2.
 
     Inputs:
         `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
-            with the word token indices in the vocabulary(see the tokens preprocessing logic in the scripts
+            with the word token indices in the vocabulary. Items in the batch should begin with the special "CLS" token. (see the tokens preprocessing logic in the scripts
             `extract_features.py`, `run_classifier.py` and `run_squad.py`)
         `token_type_ids`: an optional torch.LongTensor of shape [batch_size, sequence_length] with the token
             types indices selected in [0, 1]. Type 0 corresponds to a `sentence A` and type 1 corresponds to
@@ -941,6 +1251,8 @@ class BertForSequenceClassification(BertPreTrainedModel):
             a batch has varying length sentences.
         `labels`: labels for the classification output: torch.LongTensor of shape [batch_size]
             with indices selected in [0, ..., num_labels].
+        `head_mask`: an optional torch.Tensor of shape [num_heads] or [num_layers, num_heads] with indices between 0 and 1.
+            It's a mask to be used to nullify some heads of the transformer. 1.0 => head is fully masked, 0.0 => head is not masked.
 
     Outputs:
         if `labels` is not `None`:
@@ -964,16 +1276,22 @@ class BertForSequenceClassification(BertPreTrainedModel):
     logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config, num_labels):
+    def __init__(self, config, num_labels=2, output_attentions=False, keep_multihead_output=False):
         super(BertForSequenceClassification, self).__init__(config)
+        self.output_attentions = output_attentions
         self.num_labels = num_labels
-        self.bert = BertModel(config)
+        self.bert = BertModel(config, output_attentions=output_attentions,
+                                      keep_multihead_output=keep_multihead_output)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, num_labels)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
-        _, pooled_output = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None, head_mask=None):
+        outputs = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False, head_mask=head_mask)
+        if self.output_attentions:
+            all_attentions, _, pooled_output = outputs
+        else:
+            _, pooled_output = outputs
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
 
@@ -981,8 +1299,9 @@ class BertForSequenceClassification(BertPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             return loss
-        else:
-            return logits
+        elif self.output_attentions:
+            return all_attentions, logits
+        return logits
 
 
 class BertForMultipleChoice(BertPreTrainedModel):
@@ -991,7 +1310,10 @@ class BertForMultipleChoice(BertPreTrainedModel):
     the pooled output.
 
     Params:
-        `config`: a BertConfig class instance with the configuration to build a new model.
+        `config`: a BertConfig class instance with the configuration to build a new model
+        `output_attentions`: If True, also output attentions weights computed by the model at each layer. Default: False
+        `keep_multihead_output`: If True, saves output of the multi-head attention module with its gradient.
+            This can be used to compute head importance metrics. Default: False
         `num_choices`: the number of classes for the classifier. Default = 2.
 
     Inputs:
@@ -1007,6 +1329,8 @@ class BertForMultipleChoice(BertPreTrainedModel):
             a batch has varying length sentences.
         `labels`: labels for the classification output: torch.LongTensor of shape [batch_size]
             with indices selected in [0, ..., num_choices].
+        `head_mask`: an optional torch.Tensor of shape [num_heads] or [num_layers, num_heads] with indices between 0 and 1.
+            It's a mask to be used to nullify some heads of the transformer. 1.0 => head is fully masked, 0.0 => head is not masked.
 
     Outputs:
         if `labels` is not `None`:
@@ -1029,19 +1353,25 @@ class BertForMultipleChoice(BertPreTrainedModel):
     logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config, num_choices):
+    def __init__(self, config, num_choices=2, output_attentions=False, keep_multihead_output=False):
         super(BertForMultipleChoice, self).__init__(config)
+        self.output_attentions = output_attentions
         self.num_choices = num_choices
-        self.bert = BertModel(config)
+        self.bert = BertModel(config, output_attentions=output_attentions,
+                                      keep_multihead_output=keep_multihead_output)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, 1)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None, head_mask=None):
         flat_input_ids = input_ids.view(-1, input_ids.size(-1))
-        flat_token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1))
-        flat_attention_mask = attention_mask.view(-1, attention_mask.size(-1))
-        _, pooled_output = self.bert(flat_input_ids, flat_token_type_ids, flat_attention_mask, output_all_encoded_layers=False)
+        flat_token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        flat_attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        outputs = self.bert(flat_input_ids, flat_token_type_ids, flat_attention_mask, output_all_encoded_layers=False, head_mask=head_mask)
+        if self.output_attentions:
+            all_attentions, _, pooled_output = outputs
+        else:
+            _, pooled_output = outputs
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
         reshaped_logits = logits.view(-1, self.num_choices)
@@ -1050,8 +1380,9 @@ class BertForMultipleChoice(BertPreTrainedModel):
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(reshaped_logits, labels)
             return loss
-        else:
-            return reshaped_logits
+        elif self.output_attentions:
+            return all_attentions, reshaped_logits
+        return reshaped_logits
 
 
 class BertForTokenClassification(BertPreTrainedModel):
@@ -1060,7 +1391,10 @@ class BertForTokenClassification(BertPreTrainedModel):
     the full hidden state of the last layer.
 
     Params:
-        `config`: a BertConfig class instance with the configuration to build a new model.
+        `config`: a BertConfig class instance with the configuration to build a new model
+        `output_attentions`: If True, also output attentions weights computed by the model at each layer. Default: False
+        `keep_multihead_output`: If True, saves output of the multi-head attention module with its gradient.
+            This can be used to compute head importance metrics. Default: False
         `num_labels`: the number of classes for the classifier. Default = 2.
 
     Inputs:
@@ -1076,6 +1410,8 @@ class BertForTokenClassification(BertPreTrainedModel):
             a batch has varying length sentences.
         `labels`: labels for the classification output: torch.LongTensor of shape [batch_size, sequence_length]
             with indices selected in [0, ..., num_labels].
+        `head_mask`: an optional torch.Tensor of shape [num_heads] or [num_layers, num_heads] with indices between 0 and 1.
+            It's a mask to be used to nullify some heads of the transformer. 1.0 => head is fully masked, 0.0 => head is not masked.
 
     Outputs:
         if `labels` is not `None`:
@@ -1099,16 +1435,22 @@ class BertForTokenClassification(BertPreTrainedModel):
     logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config, num_labels):
+    def __init__(self, config, num_labels=2, output_attentions=False, keep_multihead_output=False):
         super(BertForTokenClassification, self).__init__(config)
+        self.output_attentions = output_attentions
         self.num_labels = num_labels
-        self.bert = BertModel(config)
+        self.bert = BertModel(config, output_attentions=output_attentions,
+                                      keep_multihead_output=keep_multihead_output)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.classifier = nn.Linear(config.hidden_size, num_labels)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
-        sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None, head_mask=None):
+        outputs = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False, head_mask=head_mask)
+        if self.output_attentions:
+            all_attentions, sequence_output, _ = outputs
+        else:
+            sequence_output, _ = outputs
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
 
@@ -1123,8 +1465,9 @@ class BertForTokenClassification(BertPreTrainedModel):
             else:
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             return loss
-        else:
-            return logits
+        elif self.output_attentions:
+            return all_attentions, logits
+        return logits
 
 
 class BertForQuestionAnswering(BertPreTrainedModel):
@@ -1133,7 +1476,10 @@ class BertForQuestionAnswering(BertPreTrainedModel):
     the sequence output that computes start_logits and end_logits
 
     Params:
-        `config`: a BertConfig class instance with the configuration to build a new model.
+        `config`: a BertConfig class instance with the configuration to build a new model
+        `output_attentions`: If True, also output attentions weights computed by the model at each layer. Default: False
+        `keep_multihead_output`: If True, saves output of the multi-head attention module with its gradient.
+            This can be used to compute head importance metrics. Default: False
 
     Inputs:
         `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
@@ -1152,6 +1498,8 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         `end_positions`: position of the last token for the labeled span: torch.LongTensor of shape [batch_size].
             Positions are clamped to the length of the sequence and position outside of the sequence are not taken
             into account for computing the loss.
+        `head_mask`: an optional torch.Tensor of shape [num_heads] or [num_layers, num_heads] with indices between 0 and 1.
+            It's a mask to be used to nullify some heads of the transformer. 1.0 => head is fully masked, 0.0 => head is not masked.
 
     Outputs:
         if `start_positions` and `end_positions` are not `None`:
@@ -1174,16 +1522,23 @@ class BertForQuestionAnswering(BertPreTrainedModel):
     start_logits, end_logits = model(input_ids, token_type_ids, input_mask)
     ```
     """
-    def __init__(self, config):
+    def __init__(self, config, output_attentions=False, keep_multihead_output=False):
         super(BertForQuestionAnswering, self).__init__(config)
-        self.bert = BertModel(config)
-        # TODO check with Google if it's normal there is no dropout on the token classifier of SQuAD in the TF version
-        # self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.output_attentions = output_attentions
+        self.bert = BertModel(config, output_attentions=output_attentions,
+                                      keep_multihead_output=keep_multihead_output)
         self.qa_outputs = nn.Linear(config.hidden_size, 2)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None, end_positions=None):
-        sequence_output, _ = self.bert(input_ids, token_type_ids, attention_mask, output_all_encoded_layers=False)
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None,
+                end_positions=None, head_mask=None):
+        outputs = self.bert(input_ids, token_type_ids, attention_mask,
+                                                       output_all_encoded_layers=False,
+                                                       head_mask=head_mask)
+        if self.output_attentions:
+            all_attentions, sequence_output, _ = outputs
+        else:
+            sequence_output, _ = outputs
         logits = self.qa_outputs(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)
@@ -1205,5 +1560,6 @@ class BertForQuestionAnswering(BertPreTrainedModel):
             end_loss = loss_fct(end_logits, end_positions)
             total_loss = (start_loss + end_loss) / 2
             return total_loss
-        else:
-            return start_logits, end_logits
+        elif self.output_attentions:
+            return all_attentions, start_logits, end_logits
+        return start_logits, end_logits
