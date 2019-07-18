@@ -2,30 +2,31 @@
 # model parameters
 
 ```python3
-model = BertClassifier(   
-                bert_model='bert-base-uncased',
-                label_list=None, 
-                num_mlp_hiddens=500,
-                num_mlp_layers=0,
-                epochs=3,
-                max_seq_length=128,
-                train_batch_size=32,
-                eval_batch_size=8,
-                learning_rate=2e-5,
-                warmup_proportion=0.1,
-                gradient_accumulation_steps=1,
-                fp16=False,
-                loss_scale=0,
-                local_rank=-1,
-                use_cuda=True,
-                random_state=42,
-                validation_fraction=0.1,
-                logfile='bert_sklearn.log')
+model = BertClassifier(bert_model='bert-base-uncased',
+                       label_list=None, 
+                       num_mlp_hiddens=500,
+                       num_mlp_layers=0,
+                       epochs=3,
+                       max_seq_length=128,
+                       train_batch_size=32,
+                       eval_batch_size=8,
+                       learning_rate=2e-5,
+                       warmup_proportion=0.1,
+                       gradient_accumulation_steps=1,
+                       fp16=False,
+                       loss_scale=0,
+                       local_rank=-1,
+                       use_cuda=True,
+                       random_state=42,
+                       validation_fraction=0.1,
+                       logfile='bert_sklearn.log')
 ```
 
 ### bert model options
 
-`bert_model`: one of Google AI's pretrained BERT models.  See [pytorch-pretrained-BERT doc](https://github.com/huggingface/pytorch-pretrained-BERT#Doc) for more info.
+`bert_model`: one of Google's , SciBERT, or BioBERT pretrained models:
+
+**Google AI's pretrained BERT models**  See [pytorch-pretrained-BERT doc](https://github.com/huggingface/pytorch-pretrained-BERT#Doc) for more info.
  * `'bert-base-uncased'` (default)
  * `'bert-large-uncased'`
  * `'bert-base-cased'`
@@ -33,7 +34,20 @@ model = BertClassifier(
  * `'bert-base-multilingual-uncased'`
  * `'bert-base-multilingual-cased'`
  * `'bert-base-chinese'`
+ 
+ **SciBERT pretrained BERT models**  See [`SciBERT` github](https://github.com/allenai/scibert) and [paper](https://arxiv.org/pdf/1903.10676.pdf) for more info.
+ * `'scibert-scivocab-uncased'`
+ * `'scibert-scivocab-cased'`
+ * `'scibert-basevocab-uncased'`
+ * `'scibert-basevocab-cased'`
 
+ **BioBERT pretrained BERT models**  See [`BioBERT` github](https://github.com/dmis-lab/biobert) and [paper](https://arxiv.org/pdf/1901.08746.pdf) for more info.
+* `'biobert-base-cased'`
+* `'biobert-v1.1-pubmed-base-cased'`
+* `'biobert-v1.0-pubmed-base-cased'`
+* `'biobert-v1.0-pubmed-pmc-base-cased'`
+* `'biobert-v1.0-pmc-base-cased'`
+ 
 ### final classifier/regressor options
 `label_list`: list of classifier labels. If `None`, then the labels will be inferred from training data in model.fit(). Default: `None`
 
