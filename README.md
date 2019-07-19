@@ -7,6 +7,10 @@
 * Includes token sequence classifier for NER, PoS, and chunking tasks
 * Includes  [**`SciBERT`**](https://github.com/allenai/scibert) and [**`BioBERT`**](https://github.com/dmis-lab/biobert) pretrained models for scientific  and biomedical domains.
 
+
+Try in [Google Colab](https://colab.research.google.com/drive/1-wTNA-qYmOBdSYG7sRhIdOrxcgPpcl6L)!
+
+
 ## installation
 
 requires python >= 3.5 and pytorch >= 0.4.1
