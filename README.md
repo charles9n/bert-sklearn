@@ -170,11 +170,12 @@ python -m pytest -sv tests/
 
 ## references
 
-* [Google AI's original tf `BERT` github](https://github.com/google-research/bert) and [paper](https://arxiv.org/abs/1810.04805)
+* [Google `BERT` github](https://github.com/google-research/bert)  and [paper: "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding" (10/2018) by
+J. Devlin, M. Chang, K. Lee, and K. Toutanova](https://arxiv.org/abs/1810.04805)
 
-* [huggingface pytorch github](https://github.com/huggingface/pytorch-pretrained-BERT)
+* [huggingface `pytorch-pretrained-BERT` github](https://github.com/huggingface/pytorch-pretrained-BERT)
 
-* [`SciBERT` github](https://github.com/allenai/scibert) and [paper](https://arxiv.org/pdf/1903.10676.pdf)
+* [`SciBERT` github](https://github.com/allenai/scibert) and [paper: "SCIBERT: Pretrained Contextualized Embeddings for Scientific Text" (3/2019) by I. Beltagy, A. Cohan, and  K. Lo](https://arxiv.org/pdf/1903.10676.pdf)
 
-* [`BioBERT` github](https://github.com/dmis-lab/biobert) and [paper](https://arxiv.org/pdf/1901.08746.pdf)  
-
+* [`BioBERT` github](https://github.com/dmis-lab/biobert) and [paper: "BioBERT: a pre-trained biomedical language representation model for biomedical text mining" (2/2019) by J. Lee, W. Yoon, S. Kim , D. Kim, S. Kim , C.H. So, and J. Kang
+](https://arxiv.org/pdf/1901.08746.pdf)  
