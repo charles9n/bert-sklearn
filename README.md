@@ -154,7 +154,7 @@ See [SciBERT paper](https://arxiv.org/pdf/1903.10676.pdf) and [BioBERT paper](ht
 
 ## Other examples
 
-* See [IMDb notebook](https://github.com/charles9n/bert-sklearn-tmp/blob/master/other_examples/IMDb.ipynb) for a text classification demo on the Internet Movie Database review sentiment task.
+* See [IMDb notebook](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/IMDb.ipynb) for a text classification demo on the Internet Movie Database review sentiment task.
 
 * See [chunking_english notebook](https://github.com/charles9n/bert-sklearn/blob/master/other_examples/chunker_english.ipynb) for a demo on syntactic chunking using the [**`CoNLL-2000`**](https://www.clips.uantwerpen.be/conll2003/ner/) chunking task data.
 
