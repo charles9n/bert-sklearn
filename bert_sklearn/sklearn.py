@@ -155,7 +155,7 @@ class BaseBertEstimator(BaseEstimator):
                  gradient_accumulation_steps=1, fp16=False, loss_scale=0,
                  local_rank=-1, use_cuda=True, random_state=42,
                  validation_fraction=0.1, logfile='bert_sklearn.log',
-                 ignore_label=None):
+                 ignore_label=None, no_stdout=True, progress_bar=False):
 
         self.id2label, self.label2id = {}, {}
         self.input_text_pairs = None
@@ -183,6 +183,7 @@ class BaseBertEstimator(BaseEstimator):
         self.random_state = random_state
         self.validation_fraction = validation_fraction
         self.logfile = logfile
+        self.progress_bar = progress_bar
         self.ignore_label = ignore_label
         self.majority_label = None
         self.majority_id = None
@@ -208,7 +209,7 @@ class BaseBertEstimator(BaseEstimator):
             self.model_type = "text_regressor"
             self.num_labels = 1
 
-        self.logger = get_logger(logfile)
+        self.logger = get_logger(logfile, no_stdout)
         self.logger.info("Loading model:\n" + str(self))
 
     def load_tokenizer(self):
@@ -508,8 +509,10 @@ class BertClassifier(BaseBertEstimator, ClassifierMixin):
 
         probs = []
         sys.stdout.flush()
-        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
-
+        if self.progress_bar:
+            batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        else:
+            batch_iter = dataloader
         for batch in batch_iter:
             batch = tuple(t.to(device) for t in batch)
             with torch.no_grad():
@@ -573,8 +576,10 @@ class BertRegressor(BaseBertEstimator, RegressorMixin):
 
         ypred_list = []
         sys.stdout.flush()
-        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
-
+        if self.progress_bar:
+            batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        else:
+            batch_iter = dataloader
         for batch in batch_iter:
             batch = tuple(t.to(device) for t in batch)
             with torch.no_grad():
@@ -634,7 +639,10 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         device = config.device
 
         sys.stdout.flush()
-        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        if self.progress_bar:
+            batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        else:
+            batch_iter = dataloader
 
         for batch in batch_iter:
             # get the token_starts mask from batch
@@ -704,7 +712,10 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         device = config.device
 
         sys.stdout.flush()
-        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        if self.progress_bar:
+            batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        else:
+            batch_iter = dataloader
 
         for batch in batch_iter:
             # peel off the token_starts mask from batch
@@ -812,7 +823,7 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         return tags
 
 
-def load_model(filename):
+def load_model(filename, no_stdout=False, progress_bar=False):
     """
     Load BertClassifier, BertRegressor, or BertTokenClassifier from a disk file.
 
@@ -835,5 +846,5 @@ def load_model(filename):
 
     # call the constructor to load the model
     model_ctor = classes[class_name]
-    model = model_ctor(restore_file=filename)
+    model = model_ctor(restore_file=filename, no_stdout=no_stdout, progress_bar=progress_bar)
     return model
