@@ -71,9 +71,6 @@ from .finetune import finetune
 from .finetune import eval_model
 from .model.pytorch_pretrained.modeling import PRETRAINED_MODEL_ARCHIVE_MAP
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt='%m/%d/%Y %H:%M:%S',
-                    level=logging.INFO)
 
 SUPPORTED_MODELS = list(PRETRAINED_MODEL_ARCHIVE_MAP.keys())
 
@@ -141,10 +138,12 @@ class BaseBertEstimator(BaseEstimator):
         seed to initialize numpy and torch random number generators
     validation_fraction : float
         fraction of training set to use for validation
-    logname : string
-        path name for logfile
+    logfile : string
+        path name for logfile, if None logs are written to stderr
     ignore_label : list of strings
         Labels to be ignored when calculating f1 for token classifiers
+    progress_bar : bool
+        optionally display progress bar during predict and fit methods.
     """
     def __init__(self, bert_model='bert-base-uncased',
                  bert_config_json=None, bert_vocab=None,
@@ -155,7 +154,7 @@ class BaseBertEstimator(BaseEstimator):
                  gradient_accumulation_steps=1, fp16=False, loss_scale=0,
                  local_rank=-1, use_cuda=True, random_state=42,
                  validation_fraction=0.1, logfile='bert_sklearn.log',
-                 ignore_label=None):
+                 ignore_label=None, progress_bar=False):
 
         self.id2label, self.label2id = {}, {}
         self.input_text_pairs = None
@@ -183,9 +182,12 @@ class BaseBertEstimator(BaseEstimator):
         self.random_state = random_state
         self.validation_fraction = validation_fraction
         self.logfile = logfile
+        self.progress_bar = progress_bar
         self.ignore_label = ignore_label
         self.majority_label = None
         self.majority_id = None
+        self.logger = get_logger(logfile)
+        self.logger.info("Loading model:\n" + str(self))
 
         # if given a restore_file, then finish loading a previously finetuned
         # model. Normally a user wouldn't do this directly. This is called from
@@ -198,18 +200,15 @@ class BaseBertEstimator(BaseEstimator):
         # not good to use 'isinstance' :-( but the init code for these
         # classes are similar. So keep the ugly hack for now...
         if isinstance(self, BertClassifier):
-            print("Building sklearn text classifier...")
+            self.logger.info("Building sklearn text classifier...")
             self.model_type = "text_classifier"
         elif isinstance(self, BertTokenClassifier):
-            print("Building sklearn token classifier...")
+            self.logger.info("Building sklearn token classifier...")
             self.model_type = "token_classifier"
         elif isinstance(self, BertRegressor):
-            print("Building sklearn text regressor...")
+            self.logger.info("Building sklearn text regressor...")
             self.model_type = "text_regressor"
             self.num_labels = 1
-
-        self.logger = get_logger(logfile)
-        self.logger.info("Loading model:\n" + str(self))
 
     def load_tokenizer(self):
         """
@@ -420,7 +419,7 @@ class BaseBertEstimator(BaseEstimator):
             msg = "\nLoss: %0.04f, Accuracy: %0.02f%%"%(loss, accy)
             if 'f1' in res:
                 msg += ", f1: %0.02f"%(100 * res['f1'])
-            print(msg)
+            self.logger.info(msg)
         return accy
 
     def save(self, filename):
@@ -455,7 +454,7 @@ class BaseBertEstimator(BaseEstimator):
         This is called from the BertClassifier or BertRegressor. The saved model
         is a finetuned BertPlusMLP
         """
-        print("Loading model from %s..."%(restore_file))
+        self.logger.info("Loading model from %s..."%(restore_file))
         state = torch.load(restore_file)
 
         params = state['params']
@@ -508,8 +507,10 @@ class BertClassifier(BaseBertEstimator, ClassifierMixin):
 
         probs = []
         sys.stdout.flush()
-        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
-
+        if self.progress_bar:
+            batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        else:
+            batch_iter = dataloader
         for batch in batch_iter:
             batch = tuple(t.to(device) for t in batch)
             with torch.no_grad():
@@ -573,8 +574,10 @@ class BertRegressor(BaseBertEstimator, RegressorMixin):
 
         ypred_list = []
         sys.stdout.flush()
-        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
-
+        if self.progress_bar:
+            batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        else:
+            batch_iter = dataloader
         for batch in batch_iter:
             batch = tuple(t.to(device) for t in batch)
             with torch.no_grad():
@@ -634,7 +637,10 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         device = config.device
 
         sys.stdout.flush()
-        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        if self.progress_bar:
+            batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        else:
+            batch_iter = dataloader
 
         for batch in batch_iter:
             # get the token_starts mask from batch
@@ -704,7 +710,10 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
         device = config.device
 
         sys.stdout.flush()
-        batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        if self.progress_bar:
+            batch_iter = pbar(dataloader, desc="Predicting", leave=True)
+        else:
+            batch_iter = dataloader
 
         for batch in batch_iter:
             # peel off the token_starts mask from batch
@@ -773,7 +782,7 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
 
     def tokens_proba(self, tokens, prob=None, verbose=True):
         """
-        Print tag probabilities for each token.
+        Log tag probabilities for each token.
         """
         if prob is None:
             prob = self.predict_proba([tokens])
@@ -784,21 +793,21 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
             df = pd.DataFrame(prob, columns=cols)
             df.insert(0, "token", tokens)
             if IN_COLAB:
-                print('\n',df) # fix formatting in google colab
+                self.logger.info('\n',df) # fix formatting in google colab
             else:
-                print(df)
+                self.logger.info(df)
         return prob
 
     def tag_text_proba(self, text, verbose=True):
         """
-        Tokenize text and print tag probabilities for each token.
+        Tokenize text and log tag probabilities for each token.
         """
         tokens = self.basic_tokenizer.tokenize(text)
         return self.tokens_proba(tokens, verbose=verbose)
 
     def tag_text(self, text, verbose=True):
         """
-        Tokenize text and print most probable token tags.
+        Tokenize text and log most probable token tags.
         """
         tokens = self.basic_tokenizer.tokenize(text)
         tags = self.predict(np.array([tokens]))[0]
@@ -806,13 +815,13 @@ class BertTokenClassifier(BaseBertEstimator, ClassifierMixin):
             data = {"token": tokens, "predicted tags": tags}
             df = pd.DataFrame(data=data)
             if IN_COLAB:
-                print('\n',df) # fix formatting in google colab
+                self.logger.info('\n',df) # fix formatting in google colab
             else:
-                print(df)
+                self.logger.info(df)
         return tags
 
 
-def load_model(filename):
+def load_model(filename, logfile='bert_sklearn.log', progress_bar=True):
     """
     Load BertClassifier, BertRegressor, or BertTokenClassifier from a disk file.
 
@@ -820,7 +829,10 @@ def load_model(filename):
         ----------
         filename : string
             filename of saved model file
-
+        logname : string
+            filename to write logs too, if None logs are written to stderr
+        progress_bar : bool
+            display progress bar when model fitting or predicting
         Returns
         ----------
         model : BertClassifier, BertRegressor, or BertTokenClassifier model
@@ -835,5 +847,5 @@ def load_model(filename):
 
     # call the constructor to load the model
     model_ctor = classes[class_name]
-    model = model_ctor(restore_file=filename)
+    model = model_ctor(restore_file=filename, logfile=logfile, progress_bar=progress_bar)
     return model

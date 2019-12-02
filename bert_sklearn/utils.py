@@ -60,11 +60,12 @@ def unpack_data(X, y=None):
 
 
 def get_logger(logname, no_stdout=True):
+    if not logname:
+        return logging.getLogger("bert_sklearn")
     logger = logging.getLogger()
     handler = logging.StreamHandler(open(logname, "a"))
     handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                                  datefmt='%m/%d/%Y %H:%M:%S')
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     if no_stdout:
