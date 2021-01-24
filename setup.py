@@ -10,7 +10,7 @@ setup(
     license='Apache',
     url="https://github.com/charles9n/bert-sklearn",
     packages=find_packages(exclude=['test', 'scripts', 'examples']),
-    install_requires=['torch>=0.4.1',
+    install_requires=['torch>=0.4.1,<=1.4.0',
                        'scikit-learn',
                        'numpy',
                        'pandas',
