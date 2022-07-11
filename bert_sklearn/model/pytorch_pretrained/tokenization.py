@@ -42,6 +42,8 @@ PRETRAINED_VOCAB_ARCHIVE_MAP = {
     'bert-large-uncased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-uncased-whole-word-masking-finetuned-squad-vocab.txt",
     'bert-large-cased-whole-word-masking-finetuned-squad': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-large-cased-whole-word-masking-finetuned-squad-vocab.txt",
     'bert-base-cased-finetuned-mrpc': "https://s3.amazonaws.com/models.huggingface.co/bert/bert-base-cased-finetuned-mrpc-vocab.txt",
+    'bert-base-portuguese-cased': "https://huggingface.co/neuralmind/bert-base-portuguese-cased/raw/main/vocab.txt",
+    'bert-large-portuguese-cased': "https://huggingface.co/neuralmind/bert-large-portuguese-cased/raw/main/vocab.txt",
     # BioBERT models    
     'biobert-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.1-pubmed/biobert_v1.1_pubmed.tar.gz",
     'biobert-v1.1-pubmed-base-cased': "https://github.com/naver/biobert-pretrained/releases/download/v1.1-pubmed/biobert_v1.1_pubmed.tar.gz", 
